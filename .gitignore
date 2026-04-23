@@ -1,0 +1,44 @@
+# Rust
+target/
+**/target/
+Cargo.lock
+# Keep lockfile tracked (recommended for apps, which clipsnap is)
+!/Cargo.lock
+
+# Node / pnpm
+node_modules/
+**/node_modules/
+.pnpm-store/
+.pnpm-debug.log*
+
+# Build outputs
+dist/
+**/dist/
+build/
+**/build/
+
+# Tauri generated
+**/src-tauri/gen/
+**/src-tauri/WixTools/
+
+# SQLite / app runtime data
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Editor
+.vscode/
+.idea/
+*.swp
+
+# macOS
+.DS_Store
+
+# Env / secrets
+.env
+.env.local
+*.pem
+
+# Logs
+*.log

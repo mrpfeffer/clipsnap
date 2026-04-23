@@ -1,0 +1,20 @@
+{
+  "name": "clipsnap",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Fast, lightweight clipboard history manager. Windows-first, cross-platform via Tauri 2.",
+  "license": "MIT",
+  "author": "Martin Pfeffer <martinpaush@gmail.com>",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/pepperonas/clipsnap.git"
+  },
+  "scripts": {
+    "dev:win": "pnpm --filter clipsnap-win tauri dev",
+    "build:win": "pnpm --filter clipsnap-win tauri build",
+    "lint": "pnpm --filter clipsnap-frontend lint",
+    "typecheck": "pnpm --filter clipsnap-frontend typecheck",
+    "format": "pnpm --filter clipsnap-frontend format",
+    "check": "bash scripts/check.sh"
+  }
+}

@@ -1,0 +1,59 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "ClipSnap",
+  "version": "0.1.0",
+  "identifier": "io.celox.clipsnap",
+  "build": {
+    "beforeDevCommand": "pnpm dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "pnpm build",
+    "frontendDist": "../../core/frontend/dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "popup",
+        "title": "ClipSnap",
+        "width": 600,
+        "height": 500,
+        "center": true,
+        "resizable": false,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "visible": false,
+        "focus": true,
+        "shadow": false
+      }
+    ],
+    "security": {
+      "csp": null
+    },
+    "trayIcon": {
+      "id": "main",
+      "iconPath": "icons/icon.png",
+      "iconAsTemplate": true,
+      "tooltip": "ClipSnap"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["msi"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "windows": {
+      "wix": {
+        "language": "en-US"
+      }
+    },
+    "copyright": "© 2026 Martin Pfeffer | celox.io",
+    "shortDescription": "Lightweight clipboard history manager for Windows 11",
+    "longDescription": "ClipSnap is a fast, lightweight clipboard history manager for Windows 11. Press Ctrl+Shift+V to browse, search, and paste anything you've recently copied."
+  }
+}

@@ -1,0 +1,4 @@
+packages:
+  - "core/frontend"
+  - "win"
+  # later: "macos", "linux"
