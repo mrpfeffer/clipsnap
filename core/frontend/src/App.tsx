@@ -105,14 +105,16 @@ function App() {
     <div className="flex h-screen w-screen p-2">
       <div className="app-shell fade-in flex h-full w-full flex-col">
 
-        {/* Tab bar + search */}
-        <div className="flex items-center gap-2 border-b border-[var(--color-border)] px-3 py-1.5">
+        {/* Header — fixed height, tab buttons anchored top-right */}
+        <div className="relative shrink-0">
           {activeTab === "history" ? (
             <SearchBar ref={searchRef} value={query} onChange={setQuery} />
           ) : (
-            <span className="flex-1 text-[13px] font-semibold">Snippets</span>
+            <div className="flex h-14 items-center border-b border-[var(--color-border)] px-4">
+              <span className="text-[15px] font-semibold">Snippets</span>
+            </div>
           )}
-          <div className="flex shrink-0 gap-1">
+          <div className="absolute right-3 top-1/2 flex -translate-y-1/2 gap-1">
             <TabButton active={activeTab === "history"} onClick={() => setActiveTab("history")}>
               History
             </TabButton>
