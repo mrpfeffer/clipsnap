@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Required for WKWebView JIT compilation -->
+  <key>com.apple.security.cs.allow-jit</key>
+  <true/>
+  <!-- Required for WebKit unsigned memory -->
+  <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+  <true/>
+  <!-- Required for loading Tauri plugins -->
+  <key>com.apple.security.cs.disable-library-validation</key>
+  <true/>
+  <!-- Required for enigo to simulate keyboard events (paste) -->
+  <key>com.apple.security.automation.apple-events</key>
+  <true/>
+</dict>
+</plist>

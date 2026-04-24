@@ -18,7 +18,7 @@ use crate::models::{ClipEntry, ContentType};
 pub fn paste_entry(entry: &ClipEntry) -> Result<()> {
     write_to_clipboard(entry)?;
     thread::sleep(Duration::from_millis(50));
-    send_ctrl_v()?;
+    send_paste_shortcut()?;
     Ok(())
 }
 
@@ -58,23 +58,30 @@ fn write_to_clipboard(entry: &ClipEntry) -> Result<()> {
     Ok(())
 }
 
-/// Write plain text to the OS clipboard, then simulate Ctrl+V.
+/// Write plain text to the OS clipboard, then simulate the paste shortcut.
 pub fn paste_text(text: &str) -> Result<()> {
     let ctx = ClipboardContext::new()
         .map_err(|e| anyhow!("clipboard ctx init failed: {e:?}"))?;
     ctx.set_text(text.to_string())
         .map_err(|e| anyhow!("set_text failed: {e:?}"))?;
     thread::sleep(Duration::from_millis(50));
-    send_ctrl_v()?;
+    send_paste_shortcut()?;
     Ok(())
 }
 
-fn send_ctrl_v() -> Result<()> {
+fn send_paste_shortcut() -> Result<()> {
     let mut enigo = Enigo::new(&Settings::default())
         .map_err(|e| anyhow!("enigo init failed: {e:?}"))?;
+
+    // macOS paste = Cmd+V; Windows/Linux paste = Ctrl+V.
+    #[cfg(target_os = "macos")]
+    let modifier = Key::Meta;
+    #[cfg(not(target_os = "macos"))]
+    let modifier = Key::Control;
+
     enigo
-        .key(Key::Control, Press)
-        .map_err(|e| anyhow!("ctrl press: {e:?}"))?;
+        .key(modifier, Press)
+        .map_err(|e| anyhow!("modifier press: {e:?}"))?;
     enigo
         .key(Key::Unicode('v'), Press)
         .map_err(|e| anyhow!("v press: {e:?}"))?;
@@ -82,7 +89,7 @@ fn send_ctrl_v() -> Result<()> {
         .key(Key::Unicode('v'), Release)
         .map_err(|e| anyhow!("v release: {e:?}"))?;
     enigo
-        .key(Key::Control, Release)
-        .map_err(|e| anyhow!("ctrl release: {e:?}"))?;
+        .key(modifier, Release)
+        .map_err(|e| anyhow!("modifier release: {e:?}"))?;
     Ok(())
 }

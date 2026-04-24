@@ -31,8 +31,9 @@ Pre-built Windows binaries are attached to every [GitHub Release](https://github
 
 | File | Description |
 |------|-------------|
-| `ClipSnap_x.x.x_x64_en-US.msi` | Windows installer — recommended, adds start-menu entry and uninstaller |
-| `clipsnap.exe` | Standalone executable — no installation needed, just run it |
+| `ClipSnap_x.x.x_x64_en-US.msi` | Windows installer — adds start-menu entry and uninstaller |
+| `clipsnap.exe` | Windows standalone executable — no installation needed |
+| `ClipSnap_x.x.x_x64.dmg` | macOS disk image |
 
 ---
 
@@ -41,7 +42,7 @@ Pre-built Windows binaries are attached to every [GitHub Release](https://github
 | Platform   | Status                | Location                |
 |------------|-----------------------|-------------------------|
 | Windows 11 | ✅ implemented (v0.2) | [`win/`](./win)         |
-| macOS      | 🟡 planned            | `macos/` (not yet)      |
+| macOS      | ✅ implemented (v0.2) | [`macos/`](./macos)     |
 | Linux      | 🟡 planned            | `linux/` (not yet)      |
 
 All app logic lives in [`core/`](./core) — a single frontend (`core/frontend`) and a single Rust lib (`core/rust-lib`) shared across platforms. Each OS has its own thin bundle shell that owns platform-specific details (installer config, icons, capabilities).
@@ -104,11 +105,17 @@ Platform-specific prerequisites: **Windows** → [`win/README.md`](./win/README.
 
 ```bash
 pnpm install          # install the whole workspace
-pnpm dev:win          # tauri dev — live-reload frontend + Rust
-pnpm build:win        # produces target/release/bundle/msi/ClipSnap_x.x.x_x64_en-US.msi
+
+# Windows
+pnpm dev:win          # tauri dev — live-reload
+pnpm build:win        # → target/release/bundle/msi/ClipSnap_x.x.x_x64_en-US.msi
+
+# macOS
+pnpm dev:macos        # tauri dev — live-reload
+pnpm build:macos      # → target/release/bundle/dmg/ClipSnap_x.x.x_x64.dmg
 ```
 
-> The `.msi` bundle must be produced on a Windows host. `pnpm dev:win` also runs on macOS / Linux for iterating on shared code.
+> Each platform must be built on its native host (Windows for MSI, macOS for DMG).
 
 ### Tests
 
@@ -131,6 +138,8 @@ pnpm check            # cargo clippy (workspace) + tsc --noEmit + eslint
 | **No sensitive-app detection** | ClipSnap captures everything without filtering. |
 | **No cloud sync** | No sync, multi-device support, tagging, or favorites — explicitly out of scope for v1. |
 | **File paste fallback** | Setting file-list clipboard payloads from Rust is not universally supported; ClipSnap falls back to pasting the newline-joined list of paths as text. |
+| **macOS accessibility** | Paste simulation (`enigo`) requires Accessibility access. macOS will prompt on first use — grant it in System Preferences → Privacy & Security → Accessibility. |
+| **macOS unsigned build** | Release builds are not notarized. macOS may warn "unidentified developer" — right-click the app and choose Open to bypass Gatekeeper on first launch. |
 
 ## Releasing a new version
 

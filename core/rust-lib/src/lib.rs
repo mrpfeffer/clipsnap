@@ -50,6 +50,12 @@ pub fn run(context: tauri::Context<Wry>) {
 
             build_tray(&app.handle())?;
 
+            // Hide from macOS Dock — ClipSnap is a tray-only background app.
+            #[cfg(target_os = "macos")]
+            if let Err(e) = app.set_activation_policy(tauri::ActivationPolicy::Accessory) {
+                tracing::warn!("set_activation_policy: {e:#}");
+            }
+
             let autostart = app.autolaunch();
             let _ = autostart;
 
@@ -88,8 +94,9 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
     let snippets_item = MenuItemBuilder::with_id("snippets", "Manage Snippets").build(app)?;
     let pause_item = MenuItemBuilder::with_id("pause", "Pause Capture").build(app)?;
     let clear_item = MenuItemBuilder::with_id("clear", "Clear History…").build(app)?;
+    let autostart_label = if cfg!(target_os = "windows") { "Start with Windows" } else { "Start at Login" };
     let autostart_item =
-        MenuItemBuilder::with_id("autostart", "Start with Windows").build(app)?;
+        MenuItemBuilder::with_id("autostart", autostart_label).build(app)?;
     let sep = PredefinedMenuItem::separator(app)?;
     let sep2 = PredefinedMenuItem::separator(app)?;
     let quit_item = MenuItemBuilder::with_id("quit", "Quit ClipSnap").build(app)?;

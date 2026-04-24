@@ -1,4 +1,5 @@
 packages:
   - "core/frontend"
   - "win"
-  # later: "macos", "linux"
+  - "macos"
+  # later: "linux"
