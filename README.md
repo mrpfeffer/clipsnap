@@ -3,9 +3,9 @@
 
   # ClipSnap
 
-  **Fast, lightweight clipboard history manager for Windows 11**
+  **Fast, lightweight clipboard history manager + text expander for Windows 11**
 
-  [![Version](https://img.shields.io/badge/version-0.1.0-blue?style=flat-square)](https://github.com/pepperonas/clipsnap/releases)
+  [![Version](https://img.shields.io/badge/version-0.2.0-blue?style=flat-square)](https://github.com/pepperonas/clipsnap/releases)
   [![License: MIT](https://img.shields.io/badge/license-MIT-green?style=flat-square)](./LICENSE)
   [![Platform](https://img.shields.io/badge/platform-Windows%2011-0078D4?style=flat-square&logo=windows11&logoColor=white)](./win)
   [![Tauri 2](https://img.shields.io/badge/Tauri-2-FFC131?style=flat-square&logo=tauri&logoColor=white)](https://tauri.app)
@@ -25,25 +25,45 @@
 
 ---
 
+## Download
+
+Pre-built Windows binaries are attached to every [GitHub Release](https://github.com/pepperonas/clipsnap/releases/latest):
+
+| File | Description |
+|------|-------------|
+| `ClipSnap_x.x.x_x64_en-US.msi` | Windows installer — recommended, adds start-menu entry and uninstaller |
+| `clipsnap.exe` | Standalone executable — no installation needed, just run it |
+
+---
+
 ## Platform support
 
 | Platform   | Status                | Location                |
 |------------|-----------------------|-------------------------|
-| Windows 11 | ✅ implemented (v0.1) | [`win/`](./win)         |
+| Windows 11 | ✅ implemented (v0.2) | [`win/`](./win)         |
 | macOS      | 🟡 planned            | `macos/` (not yet)      |
 | Linux      | 🟡 planned            | `linux/` (not yet)      |
 
 All app logic lives in [`core/`](./core) — a single frontend (`core/frontend`) and a single Rust lib (`core/rust-lib`) shared across platforms. Each OS has its own thin bundle shell that owns platform-specific details (installer config, icons, capabilities).
 
-## Features (v0.1, Windows)
+## Features (v0.2, Windows)
 
+### Clipboard History
 - **Global hotkey** `Ctrl+Shift+V` opens a frameless, always-on-top popup centered on the monitor with the cursor.
 - **Clipboard capture** — text, RTF, HTML, images (≤ 5 MB, stored as base64 PNG), and file lists via real OS clipboard change events (no polling).
 - **Fuzzy search** (`fuse.js`, threshold 0.4) as you type.
-- **Virtualized list** with a preview panel per content type.
+- **Virtualized list** with a preview panel per content type (text, image, HTML render, RTF, file list).
 - **Auto-paste** — Enter pastes the selected entry into the previously focused app (`enigo` simulates `Ctrl+V`).
 - **SQLite history** at `%APPDATA%\ClipSnap\history.db`, deduped on SHA-256, capped at 1 000 entries.
-- **System tray** menu: Open · Pause Capture · Clear History · Start with Windows · Quit.
+
+### Text Expander (new in v0.2)
+- **Snippets** — store reusable text templates, each with a short abbreviation (e.g. `mfg`), an optional title, and a body.
+- **Instant expansion** — type the abbreviation in the History search bar; matching snippets appear at the top of the list ranked above clipboard entries. Press Enter to paste the snippet body directly into the previously focused app.
+- **Snippets tab** — dedicated management UI accessible via the **Snippets** tab button in the top-right of the popup. Create, edit, and delete snippets with a two-column form (abbreviation · title · body).
+- **Tray shortcut** — the system tray menu includes a **Manage Snippets** item that opens the popup directly on the Snippets tab.
+
+### System Tray
+Menu items: Open · Manage Snippets · Pause Capture · Clear History · Start with Windows · Quit.
 
 ## Repository layout
 
@@ -51,17 +71,21 @@ All app logic lives in [`core/`](./core) — a single frontend (`core/frontend`)
 clipsnap/
 ├── core/
 │   ├── frontend/            # React 19 + TS + Tailwind v4 (cross-platform)
-│   └── rust-lib/            # Shared Rust app logic (clipboard, db, hotkey, paste, tray)
+│   └── rust-lib/            # Shared Rust app logic (clipboard, db, hotkey, paste, tray, snippets)
 ├── win/                     # Windows-specific bundle shell
 │   ├── package.json         # Tauri CLI entry
 │   └── src-tauri/           # main.rs, Cargo.toml, tauri.conf.json, capabilities/, icons/
+├── .github/
+│   └── workflows/
+│       ├── ci.yml           # Rust + frontend tests on every push/PR
+│       └── release.yml      # Builds MSI + EXE and publishes GitHub Release on v* tags
 ├── docs/
 │   └── spec.md              # Original product specification
 ├── scripts/
 │   └── check.sh             # cargo clippy + tsc + eslint
 ├── Cargo.toml               # Rust workspace
 ├── pnpm-workspace.yaml      # pnpm workspace
-└── package.json             # Root scripts (dev:win, build:win, lint, typecheck)
+└── package.json             # Root scripts (dev:win, build:win, lint, typecheck, test)
 ```
 
 ## Quick start
@@ -86,6 +110,13 @@ pnpm build:win        # produces target/release/bundle/msi/ClipSnap_x.x.x_x64_en
 
 > The `.msi` bundle must be produced on a Windows host. `pnpm dev:win` also runs on macOS / Linux for iterating on shared code.
 
+### Tests
+
+```bash
+pnpm test             # frontend unit tests (vitest + happy-dom)
+cargo test --workspace  # Rust unit tests
+```
+
 ### Static analysis
 
 ```bash
@@ -101,16 +132,11 @@ pnpm check            # cargo clippy (workspace) + tsc --noEmit + eslint
 | **No cloud sync** | No sync, multi-device support, tagging, or favorites — explicitly out of scope for v1. |
 | **File paste fallback** | Setting file-list clipboard payloads from Rust is not universally supported; ClipSnap falls back to pasting the newline-joined list of paths as text. |
 
-## Download
+## Releasing a new version
 
-Pre-built Windows binaries are attached to every [GitHub Release](https://github.com/pepperonas/clipsnap/releases/latest):
-
-| File | Description |
-|------|-------------|
-| `ClipSnap_x.x.x_x64_en-US.msi` | Windows installer — recommended, adds start-menu entry and uninstaller |
-| `clipsnap.exe` | Standalone executable — no installation needed, just run it |
-
-To create a new release, push a version tag:
+1. Bump `version` in `Cargo.toml`, `win/src-tauri/tauri.conf.json`, and `package.json`.
+2. Commit the changes.
+3. Push a version tag:
 
 ```bash
 git tag v0.2.0
