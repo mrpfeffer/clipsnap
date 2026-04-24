@@ -9,6 +9,9 @@
     "type": "git",
     "url": "https://github.com/pepperonas/clipsnap.git"
   },
+  "pnpm": {
+    "onlyBuiltDependencies": ["esbuild"]
+  },
   "scripts": {
     "dev:win": "pnpm --filter clipsnap-win tauri dev",
     "build:win": "pnpm --filter clipsnap-win tauri build",
