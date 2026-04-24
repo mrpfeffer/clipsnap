@@ -172,6 +172,176 @@ pub fn clear(db: &DbHandle) -> Result<()> {
     Ok(())
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use super::prune_locked;
+    use crate::models::{ContentType, NewClip};
+    use parking_lot::Mutex;
+    use rusqlite::Connection;
+    use std::sync::Arc;
+
+    fn test_db() -> DbHandle {
+        let conn = Connection::open_in_memory().expect("in-memory db");
+        conn.execute_batch(
+            r#"
+            CREATE TABLE IF NOT EXISTS entries (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                content_type  TEXT    NOT NULL,
+                content_text  TEXT,
+                content_data  BLOB,
+                hash          TEXT    NOT NULL UNIQUE,
+                byte_size     INTEGER NOT NULL,
+                created_at    INTEGER NOT NULL,
+                last_used_at  INTEGER NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_last_used ON entries(last_used_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_hash ON entries(hash);
+            "#,
+        )
+        .unwrap();
+        Arc::new(Mutex::new(conn))
+    }
+
+    fn text_clip(s: &str) -> NewClip {
+        NewClip {
+            content_type: ContentType::Text,
+            content_text: s.to_string(),
+            content_data: s.to_string(),
+            byte_size: s.len() as i64,
+        }
+    }
+
+    #[test]
+    fn hash_payload_is_deterministic() {
+        let h1 = hash_payload(ContentType::Text, "hello");
+        let h2 = hash_payload(ContentType::Text, "hello");
+        assert_eq!(h1, h2);
+    }
+
+    #[test]
+    fn hash_payload_differs_by_content_type() {
+        let h1 = hash_payload(ContentType::Text, "hello");
+        let h2 = hash_payload(ContentType::Html, "hello");
+        assert_ne!(h1, h2);
+    }
+
+    #[test]
+    fn hash_payload_differs_by_data() {
+        let h1 = hash_payload(ContentType::Text, "hello");
+        let h2 = hash_payload(ContentType::Text, "world");
+        assert_ne!(h1, h2);
+    }
+
+    #[test]
+    fn hash_payload_is_hex_string() {
+        let h = hash_payload(ContentType::Text, "test");
+        assert!(h.chars().all(|c| c.is_ascii_hexdigit()), "not hex: {h}");
+        assert_eq!(h.len(), 64, "SHA-256 should be 64 hex chars");
+    }
+
+    #[test]
+    fn upsert_and_list_round_trip() {
+        let db = test_db();
+        upsert_clip(&db, &text_clip("hello")).unwrap();
+        let entries = list(&db, 10, 0).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].content_text, "hello");
+        assert_eq!(entries[0].content_type, ContentType::Text);
+    }
+
+    #[test]
+    fn upsert_deduplicates_identical_content() {
+        let db = test_db();
+        let id1 = upsert_clip(&db, &text_clip("dup")).unwrap();
+        let id2 = upsert_clip(&db, &text_clip("dup")).unwrap();
+        assert_eq!(id1, id2);
+        assert_eq!(list(&db, 10, 0).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn upsert_stores_distinct_entries_separately() {
+        let db = test_db();
+        upsert_clip(&db, &text_clip("a")).unwrap();
+        upsert_clip(&db, &text_clip("b")).unwrap();
+        assert_eq!(list(&db, 10, 0).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn get_returns_correct_entry() {
+        let db = test_db();
+        let id = upsert_clip(&db, &text_clip("find me")).unwrap();
+        let entry = get(&db, id).unwrap().unwrap();
+        assert_eq!(entry.id, id);
+        assert_eq!(entry.content_text, "find me");
+    }
+
+    #[test]
+    fn get_returns_none_for_missing_id() {
+        let db = test_db();
+        assert!(get(&db, 9999).unwrap().is_none());
+    }
+
+    #[test]
+    fn delete_removes_entry() {
+        let db = test_db();
+        let id = upsert_clip(&db, &text_clip("to delete")).unwrap();
+        delete(&db, id).unwrap();
+        assert!(get(&db, id).unwrap().is_none());
+        assert_eq!(list(&db, 10, 0).unwrap().len(), 0);
+    }
+
+    #[test]
+    fn clear_removes_all_entries() {
+        let db = test_db();
+        upsert_clip(&db, &text_clip("a")).unwrap();
+        upsert_clip(&db, &text_clip("b")).unwrap();
+        upsert_clip(&db, &text_clip("c")).unwrap();
+        clear(&db).unwrap();
+        assert_eq!(list(&db, 10, 0).unwrap().len(), 0);
+    }
+
+    #[test]
+    fn list_respects_limit() {
+        let db = test_db();
+        for i in 0..5 {
+            upsert_clip(&db, &text_clip(&format!("item {i}"))).unwrap();
+        }
+        assert_eq!(list(&db, 2, 0).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn list_respects_offset() {
+        let db = test_db();
+        for i in 0..5 {
+            upsert_clip(&db, &text_clip(&format!("item {i}"))).unwrap();
+        }
+        assert_eq!(list(&db, 10, 4).unwrap().len(), 1);
+        assert_eq!(list(&db, 10, 5).unwrap().len(), 0);
+    }
+
+    #[test]
+    fn touch_does_not_fail_on_valid_id() {
+        let db = test_db();
+        let id = upsert_clip(&db, &text_clip("touchable")).unwrap();
+        touch(&db, id).unwrap();
+    }
+
+    #[test]
+    fn prune_removes_oldest_entries_over_cap() {
+        let db = test_db();
+        // Insert 5 entries, then prune to 3
+        for i in 0..5 {
+            upsert_clip(&db, &text_clip(&format!("item {i}"))).unwrap();
+        }
+        {
+            let conn = db.lock();
+            prune_locked(&conn, 3).unwrap();
+        }
+        assert_eq!(list(&db, 10, 0).unwrap().len(), 3);
+    }
+}
+
 fn row_to_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<ClipEntry> {
     let ct_str: String = row.get(1)?;
     let content_type = ContentType::from_str(&ct_str).unwrap_or(ContentType::Text);

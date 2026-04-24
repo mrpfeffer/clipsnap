@@ -209,3 +209,58 @@ fn strip_html(html: &str) -> String {
     }
     out.split_whitespace().collect::<Vec<_>>().join(" ")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{strip_html, strip_rtf};
+
+    #[test]
+    fn strip_html_removes_simple_tags() {
+        assert_eq!(strip_html("<p>Hello <b>world</b></p>"), "Hello world");
+    }
+
+    #[test]
+    fn strip_html_self_closing_tag() {
+        // Tags are dropped without inserting a space; adjacent text merges.
+        assert_eq!(strip_html("line1<br/>line2"), "line1line2");
+    }
+
+    #[test]
+    fn strip_html_collapses_whitespace() {
+        assert_eq!(strip_html("a  <span>  </span>  b"), "a b");
+    }
+
+    #[test]
+    fn strip_html_plain_text_passes_through() {
+        assert_eq!(strip_html("no tags here"), "no tags here");
+    }
+
+    #[test]
+    fn strip_html_empty_input() {
+        assert_eq!(strip_html(""), "");
+    }
+
+    #[test]
+    fn strip_rtf_removes_control_words() {
+        let rtf = r"{\rtf1\ansi Hello {\b world}}";
+        let result = strip_rtf(rtf);
+        assert!(result.contains("Hello"), "expected 'Hello' in {result:?}");
+        assert!(result.contains("world"), "expected 'world' in {result:?}");
+    }
+
+    #[test]
+    fn strip_rtf_plain_text_passes_through() {
+        assert_eq!(strip_rtf("Hello world"), "Hello world");
+    }
+
+    #[test]
+    fn strip_rtf_empty_input() {
+        assert_eq!(strip_rtf(""), "");
+    }
+
+    #[test]
+    fn strip_rtf_collapses_whitespace() {
+        let result = strip_rtf("a   b");
+        assert_eq!(result, "a b");
+    }
+}

@@ -63,3 +63,38 @@ pub const MAX_IMAGE_BYTES: usize = 5 * 1024 * 1024;
 
 /// History is pruned to this many most-recently-used entries.
 pub const MAX_ENTRIES: i64 = 1000;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn content_type_as_str_round_trips() {
+        let pairs = [
+            (ContentType::Text, "text"),
+            (ContentType::Rtf, "rtf"),
+            (ContentType::Html, "html"),
+            (ContentType::Image, "image"),
+            (ContentType::Files, "files"),
+        ];
+        for (ct, s) in pairs {
+            assert_eq!(ct.as_str(), s, "as_str mismatch for {ct:?}");
+            assert_eq!(ContentType::from_str(s), Some(ct), "from_str mismatch for {s}");
+        }
+    }
+
+    #[test]
+    fn from_str_returns_none_for_unknown_input() {
+        assert_eq!(ContentType::from_str("unknown"), None);
+        assert_eq!(ContentType::from_str("TEXT"), None);
+        assert_eq!(ContentType::from_str(""), None);
+        assert_eq!(ContentType::from_str(" text"), None);
+    }
+
+    #[test]
+    fn content_type_is_copy() {
+        let ct = ContentType::Text;
+        let _ct2 = ct;
+        let _ct3 = ct; // Would fail to compile if not Copy
+    }
+}

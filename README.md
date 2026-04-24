@@ -17,6 +17,8 @@
   [![SQLite](https://img.shields.io/badge/SQLite-bundled-003B57?style=flat-square&logo=sqlite&logoColor=white)](https://sqlite.org)
   [![Issues](https://img.shields.io/github/issues/pepperonas/clipsnap?style=flat-square)](https://github.com/pepperonas/clipsnap/issues)
   [![Stars](https://img.shields.io/github/stars/pepperonas/clipsnap?style=flat-square)](https://github.com/pepperonas/clipsnap/stargazers)
+  [![CI](https://img.shields.io/github/actions/workflow/status/pepperonas/clipsnap/ci.yml?branch=main&style=flat-square&label=CI)](https://github.com/pepperonas/clipsnap/actions/workflows/ci.yml)
+  [![Latest Release](https://img.shields.io/github/v/release/pepperonas/clipsnap?style=flat-square&label=download)](https://github.com/pepperonas/clipsnap/releases/latest)
 
   Press `Ctrl+Shift+V` — search — paste. Inspired by Alfred's clipboard viewer on macOS.
 </div>
@@ -98,6 +100,24 @@ pnpm check            # cargo clippy (workspace) + tsc --noEmit + eslint
 | **No sensitive-app detection** | ClipSnap captures everything without filtering. |
 | **No cloud sync** | No sync, multi-device support, tagging, or favorites — explicitly out of scope for v1. |
 | **File paste fallback** | Setting file-list clipboard payloads from Rust is not universally supported; ClipSnap falls back to pasting the newline-joined list of paths as text. |
+
+## Download
+
+Pre-built Windows binaries are attached to every [GitHub Release](https://github.com/pepperonas/clipsnap/releases/latest):
+
+| File | Description |
+|------|-------------|
+| `ClipSnap_x.x.x_x64_en-US.msi` | Windows installer — recommended, adds start-menu entry and uninstaller |
+| `clipsnap.exe` | Standalone executable — no installation needed, just run it |
+
+To create a new release, push a version tag:
+
+```bash
+git tag v0.2.0
+git push origin v0.2.0
+```
+
+The [Release workflow](https://github.com/pepperonas/clipsnap/actions/workflows/release.yml) will build and publish automatically.
 
 ## License
 

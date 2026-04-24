@@ -9,7 +9,9 @@
     "preview": "vite preview",
     "lint": "eslint src",
     "format": "prettier --write src",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@tanstack/react-virtual": "^3.13.24",
@@ -36,6 +38,9 @@
     "tailwindcss": "^4.2.4",
     "typescript": "~5.8.3",
     "typescript-eslint": "^8.59.0",
-    "vite": "^7.0.4"
+    "vite": "^7.0.4",
+    "vitest": "^3.0.0",
+    "happy-dom": "^16.0.0",
+    "@testing-library/react": "^16.0.0"
   }
 }

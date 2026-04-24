@@ -18,6 +18,7 @@
     "lint": "pnpm --filter clipsnap-frontend lint",
     "typecheck": "pnpm --filter clipsnap-frontend typecheck",
     "format": "pnpm --filter clipsnap-frontend format",
+    "test": "pnpm --filter clipsnap-frontend test",
     "check": "bash scripts/check.sh"
   }
 }
