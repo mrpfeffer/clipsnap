@@ -1,9 +1,4 @@
 //! `clipsnap-core` — shared, OS-independent app logic for ClipSnap.
-//!
-//! Platform-specific binary crates (e.g. `win/src-tauri`) invoke [`run`] with
-//! the `Context` produced by their own `tauri::generate_context!()` macro; the
-//! macro resolves `tauri.conf.json` relative to the invoking crate, so each
-//! platform gets its own bundle config while the app logic stays here.
 
 mod clipboard_watcher;
 mod commands;
@@ -11,6 +6,7 @@ mod db;
 mod hotkey;
 mod models;
 mod paste;
+mod snippets;
 
 use std::sync::atomic::Ordering;
 
@@ -41,6 +37,8 @@ pub fn run(context: tauri::Context<Wry>) {
             tracing::info!("db at {}", db_path.display());
             let db_handle = db::open(&db_path)?;
 
+            snippets::init_table(&db_handle)?;
+
             let watcher_state = WatcherState::new();
             let paused = watcher_state.paused.clone();
 
@@ -52,12 +50,9 @@ pub fn run(context: tauri::Context<Wry>) {
 
             build_tray(&app.handle())?;
 
-            // Autostart plugin needs to be enabled explicitly; we only
-            // set it up here so the toggle is wired but disabled by default.
             let autostart = app.autolaunch();
-            let _ = autostart; // silence unused-warning when disabled
+            let _ = autostart;
 
-            // Hide-on-blur for the popup window.
             if let Some(window) = app.get_webview_window(hotkey::POPUP_LABEL) {
                 let app_handle = app.handle().clone();
                 window.on_window_event(move |ev| {
@@ -78,6 +73,11 @@ pub fn run(context: tauri::Context<Wry>) {
             commands::toggle_capture,
             commands::get_capture_state,
             commands::hide_popup,
+            commands::list_snippets,
+            commands::find_snippets,
+            commands::upsert_snippet,
+            commands::delete_snippet,
+            commands::paste_snippet,
         ])
         .run(context)
         .expect("error while running ClipSnap");
@@ -85,21 +85,24 @@ pub fn run(context: tauri::Context<Wry>) {
 
 fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
     let open_item = MenuItemBuilder::with_id("open", "Open (Ctrl+Shift+V)").build(app)?;
+    let snippets_item = MenuItemBuilder::with_id("snippets", "Manage Snippets").build(app)?;
     let pause_item = MenuItemBuilder::with_id("pause", "Pause Capture").build(app)?;
     let clear_item = MenuItemBuilder::with_id("clear", "Clear History…").build(app)?;
     let autostart_item =
         MenuItemBuilder::with_id("autostart", "Start with Windows").build(app)?;
     let sep = PredefinedMenuItem::separator(app)?;
+    let sep2 = PredefinedMenuItem::separator(app)?;
     let quit_item = MenuItemBuilder::with_id("quit", "Quit ClipSnap").build(app)?;
 
     let menu = MenuBuilder::new(app)
         .items(&[
             &open_item,
+            &snippets_item,
             &sep,
             &pause_item,
             &autostart_item,
             &clear_item,
-            &sep,
+            &sep2,
             &quit_item,
         ])
         .build()?;
@@ -113,6 +116,12 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
                 if let Err(e) = hotkey::toggle_popup(app) {
                     tracing::warn!("open from tray: {e:#}");
                 }
+            }
+            "snippets" => {
+                if let Err(e) = hotkey::show_popup(app) {
+                    tracing::warn!("show popup for snippets: {e:#}");
+                }
+                let _ = app.emit("open-snippets-tab", ());
             }
             "pause" => {
                 if let Some(state) = app.try_state::<WatcherState>() {
@@ -144,7 +153,6 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
         })
         .build(app)?;
 
-    // Silence unused warning for the MacosLauncher import on non-mac targets.
     let _ = MacosLauncher::LaunchAgent;
     Ok(())
 }

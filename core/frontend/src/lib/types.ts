@@ -11,3 +11,16 @@ export interface ClipEntry {
   created_at: number;
   last_used_at: number;
 }
+
+export interface Snippet {
+  id: number;
+  abbreviation: string;
+  title: string;
+  body: string;
+  created_at: number;
+  updated_at: number;
+}
+
+export type ListEntry =
+  | { kind: "clip"; data: ClipEntry }
+  | { kind: "snippet"; data: Snippet };

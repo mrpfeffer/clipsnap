@@ -58,6 +58,17 @@ fn write_to_clipboard(entry: &ClipEntry) -> Result<()> {
     Ok(())
 }
 
+/// Write plain text to the OS clipboard, then simulate Ctrl+V.
+pub fn paste_text(text: &str) -> Result<()> {
+    let ctx = ClipboardContext::new()
+        .map_err(|e| anyhow!("clipboard ctx init failed: {e:?}"))?;
+    ctx.set_text(text.to_string())
+        .map_err(|e| anyhow!("set_text failed: {e:?}"))?;
+    thread::sleep(Duration::from_millis(50));
+    send_ctrl_v()?;
+    Ok(())
+}
+
 fn send_ctrl_v() -> Result<()> {
     let mut enigo = Enigo::new(&Settings::default())
         .map_err(|e| anyhow!("enigo init failed: {e:?}"))?;

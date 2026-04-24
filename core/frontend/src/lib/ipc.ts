@@ -1,5 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { ClipEntry } from "./types";
+import type { ClipEntry, Snippet } from "./types";
+
+// ── Clipboard history ────────────────────────────────────────────────────────
 
 export function getHistory(limit = 500, offset = 0): Promise<ClipEntry[]> {
   return invoke("get_history", { limit, offset });
@@ -31,4 +33,32 @@ export function getCaptureState(): Promise<boolean> {
 
 export function hidePopup(): Promise<void> {
   return invoke("hide_popup");
+}
+
+// ── Snippets ─────────────────────────────────────────────────────────────────
+
+export function listSnippets(): Promise<Snippet[]> {
+  return invoke("list_snippets");
+}
+
+export function findSnippets(query: string): Promise<Snippet[]> {
+  return invoke("find_snippets", { query });
+}
+
+/** Pass id = null to create, id = number to update. Returns the snippet id. */
+export function upsertSnippet(
+  id: number | null,
+  abbreviation: string,
+  title: string,
+  body: string,
+): Promise<number> {
+  return invoke("upsert_snippet", { id, abbreviation, title, body });
+}
+
+export function deleteSnippet(id: number): Promise<void> {
+  return invoke("delete_snippet", { id });
+}
+
+export function pasteSnippet(id: number): Promise<void> {
+  return invoke("paste_snippet", { id });
 }

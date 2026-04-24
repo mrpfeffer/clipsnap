@@ -40,6 +40,19 @@ pub fn toggle_popup(app: &AppHandle) -> Result<()> {
     Ok(())
 }
 
+/// Show the popup unconditionally and center it on the cursor monitor.
+pub fn show_popup(app: &AppHandle) -> Result<()> {
+    let window = app
+        .get_webview_window(POPUP_LABEL)
+        .context("popup window not found")?;
+    if let Err(e) = center_on_cursor_monitor(&window) {
+        tracing::debug!("center_on_cursor_monitor: {e:#}");
+    }
+    window.show()?;
+    window.set_focus()?;
+    Ok(())
+}
+
 pub fn hide_popup(app: &AppHandle) {
     if let Some(w) = app.get_webview_window(POPUP_LABEL) {
         let _ = w.hide();

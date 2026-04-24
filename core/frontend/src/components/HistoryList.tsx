@@ -1,10 +1,10 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useEffect, useRef } from "react";
 import { HistoryItem } from "./HistoryItem";
-import type { ClipEntry } from "../lib/types";
+import type { ListEntry } from "../lib/types";
 
 interface Props {
-  entries: ClipEntry[];
+  entries: ListEntry[];
   selectedIndex: number;
   onSelect: (i: number) => void;
   onActivate: (i: number) => void;
@@ -47,9 +47,10 @@ export function HistoryList({ entries, selectedIndex, onSelect, onActivate }: Pr
       >
         {virtualizer.getVirtualItems().map((virtualRow) => {
           const entry = entries[virtualRow.index];
+          const key = entry.kind === "snippet" ? `s-${entry.data.id}` : `c-${entry.data.id}`;
           return (
             <HistoryItem
-              key={entry.id}
+              key={key}
               entry={entry}
               selected={virtualRow.index === selectedIndex}
               onClick={() => onSelect(virtualRow.index)}
