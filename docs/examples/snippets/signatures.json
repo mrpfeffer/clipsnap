@@ -1,0 +1,22 @@
+[
+  {
+    "abbreviation": "sig",
+    "title": "Standard signature (English)",
+    "body": "Best regards,\nMartin Pfeffer\nhttps://celox.io"
+  },
+  {
+    "abbreviation": "sigDe",
+    "title": "Standard-Signatur (Deutsch)",
+    "body": "Mit freundlichen Grüßen,\nMartin Pfeffer\nhttps://celox.io"
+  },
+  {
+    "abbreviation": "sigShort",
+    "title": "Brief signature",
+    "body": "— Martin"
+  },
+  {
+    "abbreviation": "sigOoo",
+    "title": "Out-of-office",
+    "body": "Hi,\n\nI'm out of office until <DATE> and will reply when I'm back. For urgent matters please contact <COLLEAGUE>.\n\nBest,\nMartin"
+  }
+]

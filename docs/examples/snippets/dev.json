@@ -1,0 +1,42 @@
+[
+  {
+    "abbreviation": "shebang",
+    "title": "Bash shebang",
+    "body": "#!/usr/bin/env bash\nset -euo pipefail\n"
+  },
+  {
+    "abbreviation": "license",
+    "title": "MIT license header",
+    "body": "// SPDX-License-Identifier: MIT\n// Copyright (c) 2026 Martin Pfeffer\n"
+  },
+  {
+    "abbreviation": "todo",
+    "title": "TODO comment",
+    "body": "// TODO(martin): "
+  },
+  {
+    "abbreviation": "fixme",
+    "title": "FIXME comment with date",
+    "body": "// FIXME(2026-04): "
+  },
+  {
+    "abbreviation": "rsfn",
+    "title": "Rust pub fn skeleton",
+    "body": "pub fn name() -> Result<()> {\n    Ok(())\n}\n"
+  },
+  {
+    "abbreviation": "tsfn",
+    "title": "TypeScript named export fn",
+    "body": "export function name(): void {\n  \n}\n"
+  },
+  {
+    "abbreviation": "gitignore",
+    "title": "Common .gitignore lines",
+    "body": "node_modules/\ndist/\n.DS_Store\n.env\n.env.local\n*.log\n"
+  },
+  {
+    "abbreviation": "ccmsg",
+    "title": "Conventional Commits scaffold",
+    "body": "fix(scope): summary\n\nDetails of why this change is needed and what it does.\n\nRefs: #issue\n"
+  }
+]

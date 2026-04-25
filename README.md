@@ -65,7 +65,7 @@ All app logic lives in [`core/`](./core) — a single frontend (`core/frontend`)
 - **Snippets** — store reusable text templates, each with a short abbreviation (e.g. `mfg`), an optional title, and a body.
 - **Instant expansion** — type the abbreviation in the History search bar; matching snippets appear at the top of the list ranked above clipboard entries. Press Enter to paste the snippet body directly into the previously focused app.
 - **Snippets tab** — dedicated management UI accessible via the **Snippets** tab button in the top-right of the popup. Create, edit, and delete snippets with a two-column form (abbreviation · title · body).
-- **JSON import** — bulk-load snippets from a `.json` file via **Snippets → Import**. Existing abbreviations are upserted (re-import is idempotent). See [`docs/snippets-import.md`](./docs/snippets-import.md) for the schema, and [`docs/snippets-example.json`](./docs/snippets-example.json) for a sample.
+- **JSON import** — bulk-load snippets from a `.json` file via **Snippets → Import**, which opens the native file picker. Existing abbreviations are upserted (re-import is idempotent). Format reference in [`docs/snippets-import.md`](./docs/snippets-import.md); ready-to-import themed samples (signatures, dev boilerplates, markdown templates, …) under [`docs/examples/snippets/`](./docs/examples/snippets/).
 - **Tray shortcut** — the system tray menu includes a **Manage Snippets** item that opens the popup directly on the Snippets tab.
 
 ### Multi-monitor placement
@@ -96,7 +96,9 @@ clipsnap/
 ├── docs/
 │   ├── spec.md              # Original product specification
 │   ├── snippets-import.md   # JSON snippet import — schema, semantics, examples
-│   └── snippets-example.json
+│   ├── RELEASING.md         # Release procedure
+│   └── examples/
+│       └── snippets/        # 5 themed JSON examples + their own README
 ├── scripts/
 │   └── check.sh             # cargo clippy + tsc + eslint
 ├── Cargo.toml               # Rust workspace (members: core/rust-lib, win/src-tauri, macos/src-tauri)
@@ -136,12 +138,19 @@ pnpm build:macos      # → target/release/bundle/{macos/ClipSnap.app, dmg/ClipS
 
 ### Snippet import
 
-```bash
-# bulk-load snippets from JSON
-# (Snippets tab → Import → pick file)
-```
+In ClipSnap: open the popup (`Ctrl+Shift+V`) → **Snippets** tab → **Import** → pick a `.json` file. The native file picker opens (NSOpenPanel on macOS, OpenFileDialog on Windows); existing abbreviations are upserted in place so re-importing the same file is idempotent.
 
-See [`docs/snippets-import.md`](./docs/snippets-import.md) for the file schema and semantics. A sample lives at [`docs/snippets-example.json`](./docs/snippets-example.json).
+**Ready-to-import samples** in [`docs/examples/snippets/`](./docs/examples/snippets/):
+
+| File | Snippets | Theme |
+|------|----------|-------|
+| [`getting-started.json`](./docs/examples/snippets/getting-started.json) | 3 | Address, email, German signature — first-import test |
+| [`signatures.json`](./docs/examples/snippets/signatures.json) | 4 | Email signatures (DE/EN, short, OOO template) |
+| [`dev.json`](./docs/examples/snippets/dev.json) | 8 | Shebang, MIT header, fn skeletons, gitignore, commit-msg |
+| [`markdown.json`](./docs/examples/snippets/markdown.json) | 5 | Headings, table, `<details>`, PR-body |
+| [`wrapped-form.json`](./docs/examples/snippets/wrapped-form.json) | 2 | Demonstrates `{ "snippets": [...] }` shape |
+
+See [`docs/snippets-import.md`](./docs/snippets-import.md) for the full schema, field semantics, the sqlite3+jq export recipe, and tips/anti-patterns.
 
 ### Tests
 

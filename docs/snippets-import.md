@@ -67,15 +67,33 @@ The wrapped form is preferred when you want to extend the schema later (e.g., ad
 - **Whitespace trimming.** Leading/trailing whitespace is stripped from `abbreviation` and `title`. The `body` is preserved exactly — leading spaces and trailing newlines you put in your file end up in the paste.
 - **JSON parse errors abort.** A malformed file produces a single error string; nothing is written.
 
-## Sample file
+## Sample files
 
-A small example lives at [`docs/snippets-example.json`](./snippets-example.json). To try it:
+Several themed examples live under [`docs/examples/snippets/`](./examples/snippets/) — pick one as a starting point and import it directly to verify the flow:
+
+| File | Snippets | Theme |
+|------|----------|-------|
+| [`getting-started.json`](./examples/snippets/getting-started.json) | 3 | Minimal first-run sample (address, email, German signature) |
+| [`signatures.json`](./examples/snippets/signatures.json) | 4 | Email signatures (short, long, German, OOO template) |
+| [`dev.json`](./examples/snippets/dev.json) | 8 | Developer boilerplates (shebang, MIT header, fn skeletons, gitignore, commit-msg) |
+| [`markdown.json`](./examples/snippets/markdown.json) | 5 | Markdown / GitHub scaffolds (headings, table, `<details>`, PR-body) |
+| [`wrapped-form.json`](./examples/snippets/wrapped-form.json) | 2 | Demonstrates the `{ "snippets": [...] }` wrapped shape |
+
+**Try it:**
 
 1. Open ClipSnap (`Ctrl+Shift+V`)
 2. **Snippets** tab → **Import**
-3. Select `docs/snippets-example.json`
+3. Select e.g. [`docs/examples/snippets/getting-started.json`](./examples/snippets/getting-started.json) — three new entries (`addr`, `email`, `mfg`) appear in the list.
 
-You should see three new entries: `addr`, `email`, `mfg`.
+To merge several example files into one import, see [`docs/examples/snippets/README.md`](./examples/snippets/README.md).
+
+## Tips & anti-patterns
+
+- **Use abbreviations that don't collide with normal text you type.** `mfg` is unique enough; `the` would match every search.
+- **Prefer short prefix-friendly abbreviations.** ClipSnap matches abbreviation prefixes first, so `sigDe` wins over `sig` only after you type the `D`.
+- **Avoid trailing whitespace on a line you don't intend.** The body is pasted verbatim — including stray trailing spaces.
+- **Keep one file per theme** rather than one mega-file — easier to share, edit, and re-import selectively.
+- **Don't hard-code dynamic data** (timestamps, current commit SHA, etc.). ClipSnap doesn't templatize; what's in the body is what gets pasted. Use placeholders like `<DATE>` and edit after pasting.
 
 ## Programmatic export (manual)
 

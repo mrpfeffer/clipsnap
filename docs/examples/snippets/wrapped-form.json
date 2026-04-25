@@ -1,0 +1,14 @@
+{
+  "snippets": [
+    {
+      "abbreviation": "tel",
+      "title": "Phone number",
+      "body": "+49 30 1234567"
+    },
+    {
+      "abbreviation": "vat",
+      "title": "VAT-ID",
+      "body": "DE000000000"
+    }
+  ]
+}

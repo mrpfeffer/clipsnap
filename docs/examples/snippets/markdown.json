@@ -1,0 +1,27 @@
+[
+  {
+    "abbreviation": "mdh1",
+    "title": "Markdown H1 + horizontal rule",
+    "body": "# Title\n\n---\n\n"
+  },
+  {
+    "abbreviation": "mdtable",
+    "title": "Markdown 3×3 table skeleton",
+    "body": "| Column 1 | Column 2 | Column 3 |\n|----------|----------|----------|\n|          |          |          |\n|          |          |          |\n"
+  },
+  {
+    "abbreviation": "mdcollapse",
+    "title": "Collapsible <details> block",
+    "body": "<details>\n<summary>Click to expand</summary>\n\n…\n\n</details>\n"
+  },
+  {
+    "abbreviation": "mdcb",
+    "title": "Code block (TypeScript)",
+    "body": "```ts\n\n```\n"
+  },
+  {
+    "abbreviation": "prtmpl",
+    "title": "Pull request body template",
+    "body": "## Summary\n- \n\n## Test plan\n- [ ] \n\n## Notes\n- \n"
+  }
+]
