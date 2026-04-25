@@ -82,6 +82,7 @@ pub fn run(context: tauri::Context<Wry>) {
             commands::upsert_snippet,
             commands::delete_snippet,
             commands::paste_snippet,
+            commands::import_snippets,
         ])
         .run(context)
         .expect("error while running ClipSnap");

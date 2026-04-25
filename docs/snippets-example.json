@@ -1,0 +1,16 @@
+[
+  {
+    "abbreviation": "mfg",
+    "title": "Mit freundlichen Grüßen",
+    "body": "Mit freundlichen Grüßen,\n\nMartin Pfeffer"
+  },
+  {
+    "abbreviation": "addr",
+    "title": "Postadresse",
+    "body": "Some Street 1\n12345 City\nDeutschland"
+  },
+  {
+    "abbreviation": "email",
+    "body": "martinpaush@gmail.com"
+  }
+]

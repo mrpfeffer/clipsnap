@@ -1,6 +1,11 @@
-import { useState } from "react";
-import { Plus, Trash2, Zap } from "lucide-react";
-import { deleteSnippet, upsertSnippet } from "../lib/ipc";
+import { useRef, useState } from "react";
+import { Plus, Trash2, Upload, Zap } from "lucide-react";
+import {
+  deleteSnippet,
+  importSnippets,
+  upsertSnippet,
+  type ImportResult,
+} from "../lib/ipc";
 import type { Snippet } from "../lib/types";
 
 interface Props {
@@ -21,6 +26,12 @@ export function SnippetsPanel({ snippets, onRefresh }: Props) {
   const [form, setForm] = useState<FormState | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [importStatus, setImportStatus] = useState<
+    | { kind: "ok"; result: ImportResult }
+    | { kind: "err"; message: string }
+    | null
+  >(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const openNew = () => {
     setForm(EMPTY_FORM);
@@ -66,17 +77,87 @@ export function SnippetsPanel({ snippets, onRefresh }: Props) {
     await onRefresh();
   };
 
+  const onPickFile = () => {
+    setImportStatus(null);
+    fileInputRef.current?.click();
+  };
+
+  const onFileChosen = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const result = await importSnippets(text);
+      setImportStatus({ kind: "ok", result });
+      await onRefresh();
+    } catch (err) {
+      setImportStatus({ kind: "err", message: String(err) });
+    }
+  };
+
   return (
     <div className="flex min-h-0 flex-1">
       {/* Left: snippet list */}
       <div className="flex w-2/5 flex-col border-r border-[var(--color-border)]">
-        <button
-          onClick={openNew}
-          className="flex items-center gap-1.5 border-b border-[var(--color-border)] px-3 py-2 text-left text-[12px] text-[var(--color-accent)] hover:bg-[var(--color-surface)]"
-        >
-          <Plus size={13} />
-          New Snippet
-        </button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".json,application/json"
+          className="hidden"
+          onChange={onFileChosen}
+        />
+        <div className="flex border-b border-[var(--color-border)]">
+          <button
+            onClick={openNew}
+            className="flex flex-1 items-center gap-1.5 px-3 py-2 text-left text-[12px] text-[var(--color-accent)] hover:bg-[var(--color-surface)]"
+          >
+            <Plus size={13} />
+            New Snippet
+          </button>
+          <button
+            onClick={onPickFile}
+            title="Import snippets from JSON file"
+            className="flex items-center gap-1.5 border-l border-[var(--color-border)] px-3 py-2 text-[12px] text-[var(--color-muted)] hover:bg-[var(--color-surface)] hover:text-[var(--color-accent)]"
+          >
+            <Upload size={13} />
+            Import
+          </button>
+        </div>
+
+        {importStatus && (
+          <div
+            className={
+              "border-b border-[var(--color-border)] px-3 py-1.5 text-[11px] " +
+              (importStatus.kind === "ok"
+                ? "text-[var(--color-muted)]"
+                : "text-red-400")
+            }
+          >
+            {importStatus.kind === "ok" ? (
+              <>
+                Imported <b>{importStatus.result.imported}</b>
+                {importStatus.result.skipped > 0 && (
+                  <>
+                    , skipped <b>{importStatus.result.skipped}</b>
+                  </>
+                )}
+                {importStatus.result.errors.length > 0 && (
+                  <>
+                    {" — "}
+                    <span className="text-red-400">
+                      {importStatus.result.errors[0]}
+                      {importStatus.result.errors.length > 1 &&
+                        ` (+${importStatus.result.errors.length - 1} more)`}
+                    </span>
+                  </>
+                )}
+              </>
+            ) : (
+              <>Import failed: {importStatus.message}</>
+            )}
+          </div>
+        )}
 
         <div className="flex-1 overflow-auto">
           {snippets.length === 0 && (

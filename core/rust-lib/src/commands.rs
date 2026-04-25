@@ -6,7 +6,7 @@ use crate::db::{self, DbHandle};
 use crate::hotkey;
 use crate::models::ClipEntry;
 use crate::paste;
-use crate::snippets::{self, Snippet};
+use crate::snippets::{self, ImportResult, Snippet};
 
 fn map_err<E: std::fmt::Display>(e: E) -> String {
     e.to_string()
@@ -140,4 +140,15 @@ pub fn paste_snippet(
     hotkey::hide_popup(&app);
     paste::paste_text(&snippet.body).map_err(map_err)?;
     Ok(())
+}
+
+/// Import snippets from a JSON document. Existing rows with the same
+/// abbreviation are overwritten. Per-row errors are returned in the result
+/// instead of aborting the whole import.
+#[tauri::command]
+pub fn import_snippets(
+    db: State<'_, DbHandle>,
+    json: String,
+) -> Result<ImportResult, String> {
+    snippets::import_from_json(&db, &json).map_err(map_err)
 }

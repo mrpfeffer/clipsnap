@@ -62,3 +62,14 @@ export function deleteSnippet(id: number): Promise<void> {
 export function pasteSnippet(id: number): Promise<void> {
   return invoke("paste_snippet", { id });
 }
+
+export interface ImportResult {
+  imported: number;
+  skipped: number;
+  errors: string[];
+}
+
+/** Import snippets from a JSON string. Existing abbreviations get overwritten. */
+export function importSnippets(json: string): Promise<ImportResult> {
+  return invoke("import_snippets", { json });
+}
