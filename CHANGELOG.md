@@ -4,6 +4,22 @@ All notable changes to ClipSnap are documented here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.2] — 2026-04-25
+
+### Fixed
+
+- **JSON snippet import was broken on macOS.** The 0.2.1 implementation used a hidden `<input type="file">` triggered by `.click()` from React. WKWebView (Tauri's macOS renderer) does not reliably surface a native file picker for hidden inputs in this pattern, so the Import button appeared to do nothing on macOS. — *#fix(snippets)*
+
+### Changed
+
+- **Switched the snippet-import file picker to `tauri-plugin-dialog`.** The Import button now opens the native NSOpenPanel / Win32 OpenFileDialog via `@tauri-apps/plugin-dialog`'s `open()`, with a `.json` filter and a localized "Select snippets JSON file" title. Selected path is read in Rust (`std::fs::read_to_string`) and parsed by the existing `import_from_json` pipeline.
+
+### Added
+
+- New IPC command `import_snippets_from_file(path: String) -> ImportResult` (in addition to the existing `import_snippets(json: String)` which is still used by tests).
+- `tauri-plugin-dialog` workspace dep + capability permission `dialog:allow-open` in both the Windows and macOS shells.
+- Import button shows "Importing…" while the dialog/import is in flight.
+
 ## [0.2.1] — 2026-04-25
 
 ### Added
@@ -63,6 +79,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - System tray menu: Open · Pause Capture · Clear History · Start with Windows · Quit.
 - pnpm + Cargo workspaces with shared [`core/`](./core) and [`win/`](./win) bundle shell.
 
+[0.2.2]: https://github.com/pepperonas/clipsnap/releases/tag/v0.2.2
 [0.2.1]: https://github.com/pepperonas/clipsnap/releases/tag/v0.2.1
 [0.2.0]: https://github.com/pepperonas/clipsnap/releases/tag/v0.2.0
 [0.1.0]: https://github.com/pepperonas/clipsnap/commits/main

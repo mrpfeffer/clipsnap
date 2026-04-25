@@ -1,8 +1,9 @@
-import { useRef, useState } from "react";
+import { useState } from "react";
+import { open } from "@tauri-apps/plugin-dialog";
 import { Plus, Trash2, Upload, Zap } from "lucide-react";
 import {
   deleteSnippet,
-  importSnippets,
+  importSnippetsFromFile,
   upsertSnippet,
   type ImportResult,
 } from "../lib/ipc";
@@ -31,7 +32,7 @@ export function SnippetsPanel({ snippets, onRefresh }: Props) {
     | { kind: "err"; message: string }
     | null
   >(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [importing, setImporting] = useState(false);
 
   const openNew = () => {
     setForm(EMPTY_FORM);
@@ -77,22 +78,24 @@ export function SnippetsPanel({ snippets, onRefresh }: Props) {
     await onRefresh();
   };
 
-  const onPickFile = () => {
+  const onPickFile = async () => {
     setImportStatus(null);
-    fileInputRef.current?.click();
-  };
-
-  const onFileChosen = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    e.target.value = "";
-    if (!file) return;
+    setImporting(true);
     try {
-      const text = await file.text();
-      const result = await importSnippets(text);
+      const selected = await open({
+        multiple: false,
+        directory: false,
+        filters: [{ name: "JSON", extensions: ["json"] }],
+        title: "Select snippets JSON file",
+      });
+      if (!selected) return; // user cancelled
+      const result = await importSnippetsFromFile(selected);
       setImportStatus({ kind: "ok", result });
       await onRefresh();
     } catch (err) {
       setImportStatus({ kind: "err", message: String(err) });
+    } finally {
+      setImporting(false);
     }
   };
 
@@ -100,13 +103,6 @@ export function SnippetsPanel({ snippets, onRefresh }: Props) {
     <div className="flex min-h-0 flex-1">
       {/* Left: snippet list */}
       <div className="flex w-2/5 flex-col border-r border-[var(--color-border)]">
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept=".json,application/json"
-          className="hidden"
-          onChange={onFileChosen}
-        />
         <div className="flex border-b border-[var(--color-border)]">
           <button
             onClick={openNew}
@@ -116,12 +112,13 @@ export function SnippetsPanel({ snippets, onRefresh }: Props) {
             New Snippet
           </button>
           <button
-            onClick={onPickFile}
+            onClick={() => void onPickFile()}
+            disabled={importing}
             title="Import snippets from JSON file"
-            className="flex items-center gap-1.5 border-l border-[var(--color-border)] px-3 py-2 text-[12px] text-[var(--color-muted)] hover:bg-[var(--color-surface)] hover:text-[var(--color-accent)]"
+            className="flex items-center gap-1.5 border-l border-[var(--color-border)] px-3 py-2 text-[12px] text-[var(--color-muted)] hover:bg-[var(--color-surface)] hover:text-[var(--color-accent)] disabled:opacity-50"
           >
             <Upload size={13} />
-            Import
+            {importing ? "Importing…" : "Import"}
           </button>
         </div>
 

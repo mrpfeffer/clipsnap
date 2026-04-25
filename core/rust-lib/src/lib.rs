@@ -32,6 +32,7 @@ pub fn run(context: tauri::Context<Wry>) {
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_autostart::Builder::new().build())
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let db_path = db::default_db_path()?;
             tracing::info!("db at {}", db_path.display());
@@ -83,6 +84,7 @@ pub fn run(context: tauri::Context<Wry>) {
             commands::delete_snippet,
             commands::paste_snippet,
             commands::import_snippets,
+            commands::import_snippets_from_file,
         ])
         .run(context)
         .expect("error while running ClipSnap");

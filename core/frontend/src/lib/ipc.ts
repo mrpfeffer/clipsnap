@@ -73,3 +73,8 @@ export interface ImportResult {
 export function importSnippets(json: string): Promise<ImportResult> {
   return invoke("import_snippets", { json });
 }
+
+/** Read a JSON file from the given path and import its snippets. */
+export function importSnippetsFromFile(path: string): Promise<ImportResult> {
+  return invoke("import_snippets_from_file", { path });
+}

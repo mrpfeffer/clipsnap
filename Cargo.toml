@@ -3,7 +3,7 @@ resolver = "2"
 members = ["core/rust-lib", "win/src-tauri", "macos/src-tauri"]
 
 [workspace.package]
-version = "0.2.1"
+version = "0.2.2"
 edition = "2021"
 authors = ["Martin Pfeffer <martinpaush@gmail.com>"]
 license = "MIT"
@@ -17,6 +17,7 @@ tauri-plugin-opener = "2"
 tauri-plugin-clipboard-manager = "2"
 tauri-plugin-autostart = "2"
 tauri-plugin-global-shortcut = "2"
+tauri-plugin-dialog = "2"
 
 # Data / crypto
 serde = { version = "1", features = ["derive"] }

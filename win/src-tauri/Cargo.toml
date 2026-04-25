@@ -27,3 +27,4 @@ tauri-plugin-opener = { workspace = true }
 tauri-plugin-clipboard-manager = { workspace = true }
 tauri-plugin-global-shortcut = { workspace = true }
 tauri-plugin-autostart = { workspace = true }
+tauri-plugin-dialog = { workspace = true }

@@ -7,7 +7,7 @@ ClipSnap can bulk-import snippets from a JSON file. This is the fastest way to s
 1. Open the popup with `Ctrl+Shift+V`.
 2. Click the **Snippets** tab in the upper-right of the header.
 3. Click **Import** (top-right of the snippet list).
-4. Pick a `.json` file.
+4. The native file picker opens (NSOpenPanel on macOS, OpenFileDialog on Windows). Select a `.json` file.
 
 Result is shown as a one-line status:
 
@@ -97,23 +97,39 @@ The output is directly re-importable.
 
 ## IPC surface (for integrators)
 
-The frontend calls a single Tauri command:
+Two commands cover the import path. Both return `ImportResult`:
 
 ```ts
-import { invoke } from "@tauri-apps/api/core";
-
 interface ImportResult {
   imported: number;   // rows written (insert + update)
   skipped: number;    // rows that failed validation
   errors: string[];   // per-row error messages, "#<idx> (<abbr>): <reason>"
 }
-
-const result: ImportResult = await invoke("import_snippets", {
-  json: jsonString,
-});
 ```
 
-Backend implementation: [`core/rust-lib/src/snippets.rs::import_from_json`](../core/rust-lib/src/snippets.rs).
+| Command                                | Use when                                                      |
+|----------------------------------------|---------------------------------------------------------------|
+| `import_snippets(json: String)`        | You already have the JSON in memory (e.g., from a Tauri event, paste, or in-memory generation). |
+| `import_snippets_from_file(path: String)` | You have a filesystem path (typical case after `dialog.open()`). Rust reads the file with `std::fs::read_to_string` then runs the same parser. |
+
+Frontend wrapper used by the Snippets tab:
+
+```ts
+import { open } from "@tauri-apps/plugin-dialog";
+import { importSnippetsFromFile } from "../lib/ipc";
+
+const selected = await open({
+  multiple: false,
+  directory: false,
+  filters: [{ name: "JSON", extensions: ["json"] }],
+  title: "Select snippets JSON file",
+});
+if (selected) {
+  const result = await importSnippetsFromFile(selected);
+}
+```
+
+Backend implementation: [`core/rust-lib/src/snippets.rs::import_from_json`](../core/rust-lib/src/snippets.rs) and [`core/rust-lib/src/commands.rs::import_snippets_from_file`](../core/rust-lib/src/commands.rs).
 
 ## Testing
 

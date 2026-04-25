@@ -152,3 +152,15 @@ pub fn import_snippets(
 ) -> Result<ImportResult, String> {
     snippets::import_from_json(&db, &json).map_err(map_err)
 }
+
+/// Read a JSON file from disk and import its snippets. Path is supplied by
+/// the frontend after the user picked a file via the native dialog plugin.
+#[tauri::command]
+pub fn import_snippets_from_file(
+    db: State<'_, DbHandle>,
+    path: String,
+) -> Result<ImportResult, String> {
+    let json = std::fs::read_to_string(&path)
+        .map_err(|e| format!("read {path}: {e}"))?;
+    snippets::import_from_json(&db, &json).map_err(map_err)
+}
