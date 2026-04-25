@@ -27,25 +27,29 @@
 
 ## Download
 
-Pre-built Windows binaries are attached to every [GitHub Release](https://github.com/pepperonas/clipsnap/releases/latest):
+**Latest release:** [![Latest Release](https://img.shields.io/github/v/release/pepperonas/clipsnap?style=flat-square&label=latest&color=green)](https://github.com/pepperonas/clipsnap/releases/latest) — see the [CHANGELOG](./CHANGELOG.md) for what's new.
 
-| File | Description |
-|------|-------------|
-| `ClipSnap_x.x.x_x64_en-US.msi` | Windows installer — adds start-menu entry and uninstaller |
-| `clipsnap.exe` | Windows standalone executable — no installation needed |
-| `ClipSnap_x.x.x_x64.dmg` | macOS disk image |
+| Platform | File | Notes |
+|----------|------|-------|
+| **Windows 11 / 10** | [`ClipSnap_<ver>_x64_en-US.msi`](https://github.com/pepperonas/clipsnap/releases/latest) | MSI installer — adds Start-menu entry & uninstaller |
+| **Windows 11 / 10** | [`clipsnap.exe`](https://github.com/pepperonas/clipsnap/releases/latest) | Standalone exe — no install needed |
+| **macOS 10.15+ (Apple Silicon)** | [`ClipSnap_<ver>_aarch64.dmg`](https://github.com/pepperonas/clipsnap/releases/latest) | DMG for arm64 Macs |
+| **macOS Intel** | — | Build from source: [`macos/README.md`](./macos/README.md) |
+| **Linux** | — | Planned for a later release |
+
+> **macOS Gatekeeper note.** Local-build releases are **not Apple-signed**. On first launch macOS will refuse to open the app — right-click → **Open** → confirm, or **System Settings → Privacy & Security → "Open Anyway"**. Then grant **Accessibility** access (for paste). Full setup in [`macos/README.md`](./macos/README.md).
 
 ---
 
 ## Platform support
 
-| Platform   | Status                | Location                |
-|------------|-----------------------|-------------------------|
-| Windows 11 | ✅ implemented (v0.2) | [`win/`](./win)         |
-| macOS      | ✅ implemented (v0.2) | [`macos/`](./macos)     |
-| Linux      | 🟡 planned            | `linux/` (not yet)      |
+| Platform   | Status                  | Location                |
+|------------|-------------------------|-------------------------|
+| Windows 11 | ✅ implemented (v0.2.1) | [`win/`](./win)         |
+| macOS      | ✅ implemented (v0.2.1) | [`macos/`](./macos)     |
+| Linux      | 🟡 planned              | `linux/` (not yet)      |
 
-All app logic lives in [`core/`](./core) — a single frontend (`core/frontend`) and a single Rust lib (`core/rust-lib`) shared across platforms. Each OS has its own thin bundle shell that owns platform-specific details (installer config, icons, capabilities).
+All app logic lives in [`core/`](./core) — a single frontend (`core/frontend`) and a single Rust lib (`core/rust-lib`) shared across platforms. Each OS has its own thin bundle shell that owns platform-specific details (installer config, icons, capabilities). To add a new platform, see [`CONTRIBUTING.md`](./CONTRIBUTING.md#adding-a-new-platform-shell-linux-etc).
 
 ## Features (v0.2, Windows)
 
@@ -165,18 +169,17 @@ pnpm check            # cargo clippy (workspace) + tsc --noEmit + eslint
 | **macOS accessibility** | Paste simulation (`enigo`) requires Accessibility access. macOS will prompt on first use — grant it in System Preferences → Privacy & Security → Accessibility. |
 | **macOS unsigned build** | Release builds are not notarized. macOS may warn "unidentified developer" — right-click the app and choose Open to bypass Gatekeeper on first launch. |
 
-## Releasing a new version
+## Contributing
 
-1. Bump `version` in `Cargo.toml`, `win/src-tauri/tauri.conf.json`, and `package.json`.
-2. Commit the changes.
-3. Push a version tag:
+Contributions welcome — see [`CONTRIBUTING.md`](./CONTRIBUTING.md) for the dev workflow, code style, and how to add IPC commands or new platform shells.
 
-```bash
-git tag v0.2.0
-git push origin v0.2.0
-```
+## Releasing
 
-The [Release workflow](https://github.com/pepperonas/clipsnap/actions/workflows/release.yml) will build and publish automatically.
+Push a `v*` tag to trigger the [release workflow](https://github.com/pepperonas/clipsnap/actions/workflows/release.yml), which builds the Windows and macOS bundles and attaches them to a GitHub Release. Full procedure (version bumps, pre-flight checks, troubleshooting) in [`docs/RELEASING.md`](./docs/RELEASING.md).
+
+## Changelog
+
+See [`CHANGELOG.md`](./CHANGELOG.md) — every release is documented with what was added, fixed, and any known issues at the time.
 
 ## License
 
