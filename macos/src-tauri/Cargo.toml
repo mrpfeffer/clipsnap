@@ -19,7 +19,9 @@ tauri-build = { workspace = true }
 clipsnap-core = { path = "../../core/rust-lib" }
 
 # Tauri + plugins listed here so tauri-build can discover permission manifests.
-tauri = { workspace = true }
+# `macos-private-api` is required by `macOSPrivateApi: true` in tauri.conf.json
+# (used for transparent-window vibrancy on macOS).
+tauri = { workspace = true, features = ["macos-private-api"] }
 tauri-plugin-opener = { workspace = true }
 tauri-plugin-clipboard-manager = { workspace = true }
 tauri-plugin-global-shortcut = { workspace = true }

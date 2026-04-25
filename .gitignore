@@ -27,9 +27,11 @@ build/
 *.db-wal
 *.db-shm
 
-# Editor
+# Editor / agent session state
 .vscode/
 .idea/
+.claude/
+**/.claude/
 *.swp
 
 # macOS

@@ -52,9 +52,7 @@ pub fn run(context: tauri::Context<Wry>) {
 
             // Hide from macOS Dock — ClipSnap is a tray-only background app.
             #[cfg(target_os = "macos")]
-            if let Err(e) = app.set_activation_policy(tauri::ActivationPolicy::Accessory) {
-                tracing::warn!("set_activation_policy: {e:#}");
-            }
+            app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
             let autostart = app.autolaunch();
             let _ = autostart;

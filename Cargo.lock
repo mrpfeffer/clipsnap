@@ -544,7 +544,7 @@ dependencies = [
 
 [[package]]
 name = "clipsnap-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -567,8 +567,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "clipsnap-macos"
+version = "0.2.0"
+dependencies = [
+ "clipsnap-core",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-autostart",
+ "tauri-plugin-clipboard-manager",
+ "tauri-plugin-global-shortcut",
+ "tauri-plugin-opener",
+]
+
+[[package]]
 name = "clipsnap-win"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "clipsnap-core",
  "tauri",
