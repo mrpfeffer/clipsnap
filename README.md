@@ -61,10 +61,14 @@ All app logic lives in [`core/`](./core) — a single frontend (`core/frontend`)
 - **Snippets** — store reusable text templates, each with a short abbreviation (e.g. `mfg`), an optional title, and a body.
 - **Instant expansion** — type the abbreviation in the History search bar; matching snippets appear at the top of the list ranked above clipboard entries. Press Enter to paste the snippet body directly into the previously focused app.
 - **Snippets tab** — dedicated management UI accessible via the **Snippets** tab button in the top-right of the popup. Create, edit, and delete snippets with a two-column form (abbreviation · title · body).
+- **JSON import** — bulk-load snippets from a `.json` file via **Snippets → Import**. Existing abbreviations are upserted (re-import is idempotent). See [`docs/snippets-import.md`](./docs/snippets-import.md) for the schema, and [`docs/snippets-example.json`](./docs/snippets-example.json) for a sample.
 - **Tray shortcut** — the system tray menu includes a **Manage Snippets** item that opens the popup directly on the Snippets tab.
 
+### Multi-monitor placement
+The popup opens on the monitor that contains the mouse cursor at hotkey time, horizontally centered and ~⅓ from the top. Placement is **clamped** to the active monitor's bounds, so the window never extends past a screen edge — important for mixed-DPI setups (e.g., MacBook Retina + external display). Implementation in [`core/rust-lib/src/hotkey.rs`](./core/rust-lib/src/hotkey.rs).
+
 ### System Tray
-Menu items: Open · Manage Snippets · Pause Capture · Clear History · Start with Windows · Quit.
+Menu items: Open · Manage Snippets · Pause Capture · Clear History · Start with Windows / Start at Login · Quit.
 
 ## Repository layout
 
@@ -74,19 +78,26 @@ clipsnap/
 │   ├── frontend/            # React 19 + TS + Tailwind v4 (cross-platform)
 │   └── rust-lib/            # Shared Rust app logic (clipboard, db, hotkey, paste, tray, snippets)
 ├── win/                     # Windows-specific bundle shell
+│   ├── README.md            # Windows install & build details
 │   ├── package.json         # Tauri CLI entry
 │   └── src-tauri/           # main.rs, Cargo.toml, tauri.conf.json, capabilities/, icons/
+├── macos/                   # macOS-specific bundle shell
+│   ├── README.md            # macOS install, Gatekeeper, Accessibility, troubleshooting
+│   ├── package.json
+│   └── src-tauri/           # entitlements.plist, tauri.conf.json (dmg+app), capabilities/
 ├── .github/
 │   └── workflows/
 │       ├── ci.yml           # Rust + frontend tests on every push/PR
-│       └── release.yml      # Builds MSI + EXE and publishes GitHub Release on v* tags
+│       └── release.yml      # Builds bundles and publishes GitHub Release on v* tags
 ├── docs/
-│   └── spec.md              # Original product specification
+│   ├── spec.md              # Original product specification
+│   ├── snippets-import.md   # JSON snippet import — schema, semantics, examples
+│   └── snippets-example.json
 ├── scripts/
 │   └── check.sh             # cargo clippy + tsc + eslint
-├── Cargo.toml               # Rust workspace
-├── pnpm-workspace.yaml      # pnpm workspace
-└── package.json             # Root scripts (dev:win, build:win, lint, typecheck, test)
+├── Cargo.toml               # Rust workspace (members: core/rust-lib, win/src-tauri, macos/src-tauri)
+├── pnpm-workspace.yaml      # pnpm workspace (core/frontend, win, macos)
+└── package.json             # Root scripts (dev:win, build:win, dev:macos, build:macos, lint, typecheck, test)
 ```
 
 ## Quick start
@@ -99,12 +110,14 @@ clipsnap/
 | [Node.js](https://nodejs.org/) | 20+ | |
 | [pnpm](https://pnpm.io/) | 10+ | `npm install -g pnpm` |
 
-Platform-specific prerequisites: **Windows** → [`win/README.md`](./win/README.md)
+Platform-specific prerequisites:
+- **Windows** → [`win/README.md`](./win/README.md) (WiX, MSVC build tools, WebView2)
+- **macOS** → [`macos/README.md`](./macos/README.md) (Xcode CLT, Gatekeeper, Accessibility permission)
 
-### Install & run (Windows)
+### Install & run
 
 ```bash
-pnpm install          # install the whole workspace
+pnpm install          # install the whole workspace (CI uses --frozen-lockfile)
 
 # Windows
 pnpm dev:win          # tauri dev — live-reload
@@ -112,17 +125,28 @@ pnpm build:win        # → target/release/bundle/msi/ClipSnap_x.x.x_x64_en-US.m
 
 # macOS
 pnpm dev:macos        # tauri dev — live-reload
-pnpm build:macos      # → target/release/bundle/dmg/ClipSnap_x.x.x_x64.dmg
+pnpm build:macos      # → target/release/bundle/{macos/ClipSnap.app, dmg/ClipSnap_x.x.x_<arch>.dmg}
 ```
 
-> Each platform must be built on its native host (Windows for MSI, macOS for DMG).
+> Each platform must be built on its native host (Windows for MSI, macOS for DMG/`.app`). Cross-compilation is not supported.
+
+### Snippet import
+
+```bash
+# bulk-load snippets from JSON
+# (Snippets tab → Import → pick file)
+```
+
+See [`docs/snippets-import.md`](./docs/snippets-import.md) for the file schema and semantics. A sample lives at [`docs/snippets-example.json`](./docs/snippets-example.json).
 
 ### Tests
 
 ```bash
-pnpm test             # frontend unit tests (vitest + happy-dom)
-cargo test --workspace  # Rust unit tests
+pnpm test             # frontend unit tests (vitest + happy-dom) — 24 tests
+cargo test --workspace  # Rust unit tests — 33 tests (db, snippets/import)
 ```
+
+The same commands run in [GitHub Actions CI](./.github/workflows/ci.yml) on every push and PR.
 
 ### Static analysis
 
