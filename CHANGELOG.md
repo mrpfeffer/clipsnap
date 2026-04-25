@@ -4,6 +4,17 @@ All notable changes to ClipSnap are documented here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.4] — 2026-04-25
+
+### Fixed
+
+- **Paste did not land in the previously active app on macOS.** Hiding only the popup window left ClipSnap (an `Accessory`-policy app) in a state where the OS could not reliably hand key focus back to the prior frontmost app, so `enigo`'s synthesized `Cmd+V` either dropped on the floor or arrived back at ClipSnap. — *#fix(paste)*
+
+### Changed
+
+- `hotkey::hide_popup` now also calls `AppHandle::hide()` on macOS (no-op on other platforms), which invokes `NSApplication.hide(nil)` and forces the OS to restore the prior frontmost app as key window. The popup window is hidden first, then the app.
+- The settle delay between clipboard write and the synthesized paste keystroke is now platform-specific: **120 ms on macOS** (was 50 ms — `NSApp.hide()` takes a frame or two), unchanged 50 ms on Windows / Linux.
+
 ## [0.2.3] — 2026-04-25
 
 ### Fixed
@@ -97,6 +108,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - System tray menu: Open · Pause Capture · Clear History · Start with Windows · Quit.
 - pnpm + Cargo workspaces with shared [`core/`](./core) and [`win/`](./win) bundle shell.
 
+[0.2.4]: https://github.com/pepperonas/clipsnap/releases/tag/v0.2.4
 [0.2.3]: https://github.com/pepperonas/clipsnap/releases/tag/v0.2.3
 [0.2.2]: https://github.com/pepperonas/clipsnap/releases/tag/v0.2.2
 [0.2.1]: https://github.com/pepperonas/clipsnap/releases/tag/v0.2.1

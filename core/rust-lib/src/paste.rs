@@ -12,12 +12,13 @@ use std::time::Duration;
 
 use crate::models::{ClipEntry, ContentType};
 
-/// Write `entry` to the OS clipboard, then simulate Ctrl+V to paste into the
-/// window that had focus before the popup opened. Caller should hide the
-/// popup *before* calling this so focus returns to the previous app.
+/// Write `entry` to the OS clipboard, then simulate Cmd+V (macOS) / Ctrl+V
+/// (Windows / Linux) to paste into the window that had focus before the
+/// popup opened. Caller should hide the popup (and on macOS the whole app)
+/// *before* calling this so focus returns to the previous app.
 pub fn paste_entry(entry: &ClipEntry) -> Result<()> {
     write_to_clipboard(entry)?;
-    thread::sleep(Duration::from_millis(50));
+    thread::sleep(focus_settle_delay());
     send_paste_shortcut()?;
     Ok(())
 }
@@ -64,9 +65,24 @@ pub fn paste_text(text: &str) -> Result<()> {
         .map_err(|e| anyhow!("clipboard ctx init failed: {e:?}"))?;
     ctx.set_text(text.to_string())
         .map_err(|e| anyhow!("set_text failed: {e:?}"))?;
-    thread::sleep(Duration::from_millis(50));
+    thread::sleep(focus_settle_delay());
     send_paste_shortcut()?;
     Ok(())
+}
+
+/// How long to wait between hiding the popup and synthesizing the paste
+/// keystroke, so the OS has a chance to restore focus to the previously
+/// active app. macOS `NSApp.hide()` takes a frame or two to take effect;
+/// Windows is much faster.
+fn focus_settle_delay() -> Duration {
+    #[cfg(target_os = "macos")]
+    {
+        Duration::from_millis(120)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Duration::from_millis(50)
+    }
 }
 
 fn send_paste_shortcut() -> Result<()> {

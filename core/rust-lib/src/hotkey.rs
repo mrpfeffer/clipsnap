@@ -48,6 +48,13 @@ pub fn hide_popup(app: &AppHandle) {
     if let Some(w) = app.get_webview_window(POPUP_LABEL) {
         let _ = w.hide();
     }
+    // On macOS, hiding the window alone does not reliably return key focus
+    // to the previously active app — especially with `ActivationPolicy::
+    // Accessory`. Hiding the whole app (NSApp.hide(nil)) makes the OS
+    // restore the prior frontmost app, which is what `enigo`'s synthesized
+    // Cmd+V needs in order to land in the right window.
+    #[cfg(target_os = "macos")]
+    let _ = app.hide();
 }
 
 /// Move the (currently hidden) window onto the cursor's monitor, **then**
