@@ -4,6 +4,21 @@ All notable changes to ClipSnap are documented here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.3] — 2026-04-25
+
+### Fixed
+
+- **Import button appeared to crash the app on macOS.** When the native file dialog (`NSOpenPanel`) opened, the popup window lost focus, which fired our existing `Focused(false)` window event → `hide_popup()` ran → the popup vanished. The dialog often stayed half-up but with its parent gone, the user perceived the whole app as having crashed. — *#fix(snippets)*
+
+### Added
+
+- New `UiState { suppress_hide: AtomicBool }` shared state and IPC command `set_suppress_hide(suppress: bool)`. The Snippets-tab Import handler now wraps the `dialog.open()` call in `setSuppressHide(true) … finally setSuppressHide(false)` so the popup stays put while NSOpenPanel owns focus.
+- `core/rust-lib/src/ui_state.rs` — new module owning the shared UI flag.
+
+### Changed
+
+- The popup's `Focused(false)` handler in `lib.rs` consults the suppress flag before calling `hide_popup`. Default behaviour (auto-hide on click-outside, Esc, alt-tab) is unchanged.
+
 ## [0.2.2] — 2026-04-25
 
 ### Fixed
@@ -82,6 +97,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - System tray menu: Open · Pause Capture · Clear History · Start with Windows · Quit.
 - pnpm + Cargo workspaces with shared [`core/`](./core) and [`win/`](./win) bundle shell.
 
+[0.2.3]: https://github.com/pepperonas/clipsnap/releases/tag/v0.2.3
 [0.2.2]: https://github.com/pepperonas/clipsnap/releases/tag/v0.2.2
 [0.2.1]: https://github.com/pepperonas/clipsnap/releases/tag/v0.2.1
 [0.2.0]: https://github.com/pepperonas/clipsnap/releases/tag/v0.2.0

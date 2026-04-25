@@ -4,6 +4,7 @@ import { Plus, Trash2, Upload, Zap } from "lucide-react";
 import {
   deleteSnippet,
   importSnippetsFromFile,
+  setSuppressHide,
   upsertSnippet,
   type ImportResult,
 } from "../lib/ipc";
@@ -81,6 +82,10 @@ export function SnippetsPanel({ snippets, onRefresh }: Props) {
   const onPickFile = async () => {
     setImportStatus(null);
     setImporting(true);
+    // Suppress the popup's hide-on-blur while the modal file dialog owns
+    // focus — otherwise the popup vanishes (and may even tear down the
+    // dialog with it) the instant NSOpenPanel opens.
+    await setSuppressHide(true).catch(() => {});
     try {
       const selected = await open({
         multiple: false,
@@ -95,6 +100,7 @@ export function SnippetsPanel({ snippets, onRefresh }: Props) {
     } catch (err) {
       setImportStatus({ kind: "err", message: String(err) });
     } finally {
+      await setSuppressHide(false).catch(() => {});
       setImporting(false);
     }
   };

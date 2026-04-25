@@ -7,6 +7,7 @@ use crate::hotkey;
 use crate::models::ClipEntry;
 use crate::paste;
 use crate::snippets::{self, ImportResult, Snippet};
+use crate::ui_state::UiState;
 
 fn map_err<E: std::fmt::Display>(e: E) -> String {
     e.to_string()
@@ -82,6 +83,16 @@ pub fn get_capture_state(state: State<'_, WatcherState>) -> bool {
 #[tauri::command]
 pub fn hide_popup(app: AppHandle) -> Result<(), String> {
     hotkey::hide_popup(&app);
+    Ok(())
+}
+
+/// Toggle the popup's hide-on-blur behaviour. The frontend sets this to
+/// `true` before opening a modal child window (file dialog) so the popup
+/// stays visible while the modal owns focus, then resets to `false` once
+/// the modal is dismissed.
+#[tauri::command]
+pub fn set_suppress_hide(state: State<'_, UiState>, suppress: bool) -> Result<(), String> {
+    state.suppress_hide.store(suppress, Ordering::Relaxed);
     Ok(())
 }
 

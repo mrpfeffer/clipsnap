@@ -35,6 +35,12 @@ export function hidePopup(): Promise<void> {
   return invoke("hide_popup");
 }
 
+/** Tell the backend to (not) auto-hide the popup on blur. Use while a
+ *  native modal (file dialog) is open, then reset to `false`. */
+export function setSuppressHide(suppress: boolean): Promise<void> {
+  return invoke("set_suppress_hide", { suppress });
+}
+
 // ── Snippets ─────────────────────────────────────────────────────────────────
 
 export function listSnippets(): Promise<Snippet[]> {

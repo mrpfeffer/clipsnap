@@ -7,6 +7,9 @@ mod hotkey;
 mod models;
 mod paste;
 mod snippets;
+mod ui_state;
+
+pub use ui_state::UiState;
 
 use std::sync::atomic::Ordering;
 
@@ -43,8 +46,12 @@ pub fn run(context: tauri::Context<Wry>) {
             let watcher_state = WatcherState::new();
             let paused = watcher_state.paused.clone();
 
+            let ui_state = UiState::default();
+            let suppress_hide = ui_state.suppress_hide.clone();
+
             app.manage(db_handle.clone());
             app.manage(watcher_state);
+            app.manage(ui_state);
 
             hotkey::register(&app.handle())?;
             clipboard_watcher::spawn(app.handle().clone(), db_handle, paused);
@@ -62,7 +69,12 @@ pub fn run(context: tauri::Context<Wry>) {
                 let app_handle = app.handle().clone();
                 window.on_window_event(move |ev| {
                     if let WindowEvent::Focused(false) = ev {
-                        hotkey::hide_popup(&app_handle);
+                        // Don't auto-hide if a modal (e.g., file dialog) is
+                        // owning focus — the popup needs to stay visible
+                        // until the modal closes.
+                        if !suppress_hide.load(Ordering::Relaxed) {
+                            hotkey::hide_popup(&app_handle);
+                        }
                     }
                 });
             }
@@ -85,6 +97,7 @@ pub fn run(context: tauri::Context<Wry>) {
             commands::paste_snippet,
             commands::import_snippets,
             commands::import_snippets_from_file,
+            commands::set_suppress_hide,
         ])
         .run(context)
         .expect("error while running ClipSnap");
