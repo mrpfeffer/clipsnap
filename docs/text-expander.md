@@ -32,6 +32,31 @@ When you press the hotkey from a focused text field:
 
 The popup is *not* shown during this flow — focus stays in the source app the entire time.
 
+## Threading model — must run on the main thread (macOS)
+
+The entire expand cycle dispatches to the **main thread** via `AppHandle::run_on_main_thread`. Three call sites observe this rule:
+
+- The global-shortcut handler in [`hotkey.rs::register_expander`](../core/rust-lib/src/hotkey.rs)
+- The IPC command [`commands.rs::trigger_expand_at_cursor`](../core/rust-lib/src/commands.rs)
+- The IPC command [`commands.rs::diagnose_expand_at_cursor`](../core/rust-lib/src/commands.rs) — uses an `mpsc::channel` to ferry the result back from the main-thread closure to the IPC handler thread.
+
+**Why this matters (a real bug we hit in v0.2.10).** `enigo`'s macOS `Key::Unicode(...)` mapping calls `TSMGetInputSourceProperty` (Text Services Manager) to look up the layout-dependent keycode for `'c'` and `'v'`. TSM hard-asserts that it's invoked from the main thread; calling it from a worker thread fires `_dispatch_assert_queue_fail` and aborts the process with `EXC_BREAKPOINT` / `SIGTRAP`. Three crash reports under `~/Library/Logs/DiagnosticReports/clipsnap-2026-04-26-070*.ips` confirmed this stack:
+
+```
+_dispatch_assert_queue_fail
+dispatch_assert_queue
+TSMGetInputSourceProperty
+enigo::macos_impl::keycode_to_string
+enigo::Keyboard::key                  ← Key::Unicode('c') / ('v')
+expander::send_modified_letter
+expander::expand_at_cursor
+std::sys::thread::unix::Thread::new::thread_start  ← worker thread!
+```
+
+The fix landed in v0.2.11. The ~290 ms main-thread block during the cycle is invisible to the user because the popup is hidden the whole time.
+
+If you ever extend the expander or add new IPC paths that call enigo on macOS: **dispatch to the main thread**. There is no escape route — even `Key::Other(keycode)` won't help, because users would still need a layout-aware keycode lookup, which routes back through TSM.
+
 ## Hotkey format
 
 The hotkey is stored as a Tauri global-shortcut string of the form
