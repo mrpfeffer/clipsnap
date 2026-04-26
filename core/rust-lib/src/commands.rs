@@ -416,28 +416,51 @@ pub fn set_expander_config(
 /// Trigger an expand-at-cursor cycle programmatically (no hotkey press).
 /// Hides the popup first so the synthetic Cmd+Shift+← / Cmd+C / Cmd+V
 /// land in the previously focused app instead of ClipSnap itself.
+///
+/// Dispatches the enigo work to the **main thread** because enigo's macOS
+/// `Key::Unicode(...)` mapping uses TSM (Text Services Manager) which
+/// asserts main-thread, and dies with EXC_BREAKPOINT otherwise.
 #[tauri::command]
 pub fn trigger_expand_at_cursor(app: AppHandle) -> Result<(), String> {
     hotkey::hide_popup(&app);
-    // Give macOS a moment to hand key focus back to the prior app.
-    std::thread::sleep(std::time::Duration::from_millis(250));
-    let db = app
-        .try_state::<DbHandle>()
-        .ok_or_else(|| "db state not initialized".to_string())?;
-    expander::expand_at_cursor(&db).map_err(map_err)
+    let app2 = app.clone();
+    app.run_on_main_thread(move || {
+        // Give macOS a moment to hand key focus back to the prior app
+        // before we start synthesizing keystrokes.
+        std::thread::sleep(std::time::Duration::from_millis(250));
+        if let Some(db) = app2.try_state::<DbHandle>() {
+            if let Err(e) = expander::expand_at_cursor(&db) {
+                tracing::warn!("expand_at_cursor failed: {e:#}");
+            }
+        }
+    })
+    .map_err(|e| format!("dispatch to main thread: {e}"))?;
+    Ok(())
 }
 
 /// Diagnose the capture half of expansion: select previous word, copy,
 /// look up — but **don't paste**. Returns what was captured and whether
 /// any snippet matches. Used by the Settings panel's "Test now" button.
+///
+/// Same main-thread requirement as `trigger_expand_at_cursor`. Uses a
+/// blocking `mpsc` to ferry the result back from the main-thread closure
+/// to the IPC handler thread.
 #[tauri::command]
 pub fn diagnose_expand_at_cursor(
     app: AppHandle,
 ) -> Result<expander::DiagnoseResult, String> {
     hotkey::hide_popup(&app);
-    std::thread::sleep(std::time::Duration::from_millis(250));
-    let db = app
-        .try_state::<DbHandle>()
-        .ok_or_else(|| "db state not initialized".to_string())?;
-    expander::diagnose_at_cursor(&db).map_err(map_err)
+    let app2 = app.clone();
+    let (tx, rx) = std::sync::mpsc::channel();
+    app.run_on_main_thread(move || {
+        std::thread::sleep(std::time::Duration::from_millis(250));
+        let result = match app2.try_state::<DbHandle>() {
+            Some(db) => expander::diagnose_at_cursor(&db).map_err(|e| e.to_string()),
+            None => Err("db state not initialized".to_string()),
+        };
+        let _ = tx.send(result);
+    })
+    .map_err(|e| format!("dispatch to main thread: {e}"))?;
+    rx.recv()
+        .map_err(|e| format!("main thread didn't reply: {e}"))?
 }

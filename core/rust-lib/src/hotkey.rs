@@ -111,12 +111,19 @@ pub fn register_expander(
     app.global_shortcut()
         .on_shortcut(shortcut, move |_app, sc, event| {
             if event.state == ShortcutState::Pressed && *sc == shortcut {
+                // CRITICAL: enigo's `Key::Unicode(...)` mapping calls the
+                // macOS TSM (Text Services Manager) APIs, which assert
+                // they're called on the main thread. Calling them from a
+                // worker thread — as we used to with `std::thread::spawn`
+                // — fires `_dispatch_assert_queue_fail` and crashes the
+                // process with EXC_BREAKPOINT/SIGTRAP. Dispatch the whole
+                // cycle to the main thread instead. ~290 ms blocking is
+                // acceptable here: the popup is hidden during the cycle,
+                // so the freeze is invisible to the user.
                 let app = app_for_handler.clone();
-                // Run on a worker thread — synthesizing keystrokes from
-                // inside the global-shortcut callback can deadlock on some
-                // platforms.
-                std::thread::spawn(move || {
-                    if let Some(db) = app.try_state::<DbHandle>() {
+                let app_in_closure = app.clone();
+                let _ = app.run_on_main_thread(move || {
+                    if let Some(db) = app_in_closure.try_state::<DbHandle>() {
                         if let Err(e) = expander::expand_at_cursor(&db) {
                             tracing::warn!("expand_at_cursor failed: {e:#}");
                         }
