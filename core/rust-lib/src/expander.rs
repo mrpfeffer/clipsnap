@@ -1,0 +1,399 @@
+//! Trigger-based text expander.
+//!
+//! Workflow when the user presses the configured hotkey from any focused
+//! text field:
+//!
+//! 1. Save the current clipboard text (best-effort — image / file
+//!    clipboards are *not* preserved across the expansion in this version).
+//! 2. Synthesize the platform's "select previous word" shortcut
+//!    (`Option+Shift+Left` on macOS; `Ctrl+Shift+Left` elsewhere) followed
+//!    by the platform copy shortcut.
+//! 3. Read the now-selected word back out of the clipboard.
+//! 4. Look it up in the snippets table via
+//!    [`snippets::find_by_exact_abbreviation`].
+//! 5. **Hit:** write the snippet body to the clipboard, synthesize paste —
+//!    overwrites the still-active selection in the source app.
+//! 6. **Miss:** do nothing (the selection stays visible so the user
+//!    notices the failed match).
+//! 7. Restore the original clipboard text after a small delay.
+//!
+//! All of step 2-5 happens while the popup is hidden — the source app
+//! retains key focus the whole time.
+
+use anyhow::{anyhow, Result};
+use clipboard_rs::{Clipboard, ClipboardContext};
+use enigo::{
+    Direction::{Press, Release},
+    Enigo, Key, Keyboard, Settings,
+};
+use serde::Serialize;
+use std::thread;
+use std::time::Duration;
+
+use crate::db::DbHandle;
+use crate::snippets;
+
+// Whether the OS has granted ClipSnap permission to synthesize keyboard
+// events (macOS Accessibility / "Privacy & Security" → Accessibility).
+// `enigo` silently no-ops without it on macOS — the hotkey fires, the
+// `expand_at_cursor` cycle runs, but `Cmd+Shift+←` / `Cmd+C` / `Cmd+V`
+// never reach the source app, so the abbreviation never gets selected
+// or replaced. Knowing this state up-front lets the UI surface it
+// instead of leaving the user puzzled.
+#[cfg(target_os = "macos")]
+mod macos_ax {
+    use std::ffi::c_void;
+
+    type CFTypeRef = *const c_void;
+    type CFAllocatorRef = *const c_void;
+    type CFDictionaryRef = *const c_void;
+    type CFIndex = isize;
+
+    #[link(name = "ApplicationServices", kind = "framework")]
+    extern "C" {
+        pub fn AXIsProcessTrusted() -> bool;
+        pub fn AXIsProcessTrustedWithOptions(options: CFDictionaryRef) -> bool;
+        pub static kAXTrustedCheckOptionPrompt: CFTypeRef;
+    }
+
+    #[link(name = "CoreFoundation", kind = "framework")]
+    extern "C" {
+        pub static kCFBooleanTrue: CFTypeRef;
+        pub static kCFAllocatorDefault: CFAllocatorRef;
+        pub static kCFTypeDictionaryKeyCallBacks: c_void;
+        pub static kCFTypeDictionaryValueCallBacks: c_void;
+
+        pub fn CFDictionaryCreate(
+            allocator: CFAllocatorRef,
+            keys: *const CFTypeRef,
+            values: *const CFTypeRef,
+            num_values: CFIndex,
+            key_call_backs: *const c_void,
+            value_call_backs: *const c_void,
+        ) -> CFDictionaryRef;
+
+        pub fn CFRelease(cf: CFTypeRef);
+    }
+}
+
+/// Whether the OS-level synthetic-input permission is active.
+#[cfg(target_os = "macos")]
+pub fn accessibility_granted() -> bool {
+    unsafe { macos_ax::AXIsProcessTrusted() }
+}
+
+/// Whether the OS-level synthetic-input permission is active.
+#[cfg(not(target_os = "macos"))]
+pub fn accessibility_granted() -> bool {
+    // Other platforms either don't gate synthetic input behind a TCC-style
+    // permission (Windows, X11) or do so through an entirely different
+    // mechanism (Wayland portals). Optimistic default.
+    true
+}
+
+/// Trigger the macOS "would like to control this computer" dialog and
+/// add ClipSnap to **System Settings → Privacy & Security → Accessibility**
+/// so the user can flip the toggle there. Returns the *current* trusted
+/// status (which is almost always `false` immediately after the prompt
+/// appears — the user still has to grant it).
+///
+/// On non-macOS this is a no-op that returns the same as
+/// [`accessibility_granted`].
+#[cfg(target_os = "macos")]
+pub fn request_accessibility_grant() -> bool {
+    use macos_ax::*;
+    use std::ffi::c_void;
+
+    unsafe {
+        let key = kAXTrustedCheckOptionPrompt;
+        let value = kCFBooleanTrue;
+        let dict = CFDictionaryCreate(
+            kCFAllocatorDefault,
+            &key as *const _,
+            &value as *const _,
+            1,
+            &kCFTypeDictionaryKeyCallBacks as *const _ as *const c_void,
+            &kCFTypeDictionaryValueCallBacks as *const _ as *const c_void,
+        );
+        let trusted = AXIsProcessTrustedWithOptions(dict);
+        CFRelease(dict);
+        trusted
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn request_accessibility_grant() -> bool {
+    accessibility_granted()
+}
+
+/// Open **System Settings → Privacy & Security → Accessibility** at the
+/// right pane via the macOS preference URL scheme. No-op on other OSes.
+#[cfg(target_os = "macos")]
+pub fn open_accessibility_settings() -> anyhow::Result<()> {
+    std::process::Command::new("open")
+        .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| anyhow::anyhow!("open System Settings: {e}"))
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn open_accessibility_settings() -> anyhow::Result<()> {
+    Ok(())
+}
+
+/// Settings keys.
+pub const KEY_HOTKEY: &str = "expander.hotkey";
+pub const KEY_ENABLED: &str = "expander.enabled";
+
+/// Default hotkey when no setting has ever been written. `Alt + Backquote`
+/// is the German `^` key directly under Esc; on US layouts it lands on the
+/// `` ` / ~ `` key in the same physical position.
+pub const DEFAULT_HOTKEY: &str = "Alt+Backquote";
+
+/// Diagnostic outcome of an expand-cycle attempt: what got captured,
+/// whether it matched a snippet, and a preview of what would be pasted.
+/// Used by the Settings panel's "Test now" button so the user can see
+/// the *exact* reason an expansion fails (no abbreviation matched, the
+/// captured text was empty, …) instead of a silent no-op.
+#[derive(Debug, Serialize)]
+pub struct DiagnoseResult {
+    /// The whitespace-trimmed text that landed in the clipboard after
+    /// `Cmd/Ctrl+Shift+←` + `Cmd/Ctrl+C`. Empty string if nothing was
+    /// selected (no text before the cursor).
+    pub captured: String,
+    /// Set when `find_by_exact_abbreviation` returned a row.
+    pub matched_abbreviation: Option<String>,
+    /// First ~80 characters of the matched snippet body — gives the user
+    /// confidence the right snippet would be pasted.
+    pub paste_preview: Option<String>,
+}
+
+/// Run the capture half of `expand_at_cursor` (select previous word +
+/// copy + look up) **without** pasting. Restores the user's clipboard
+/// before returning. Used for "Test now" in the Settings panel — the
+/// caller is responsible for hiding the popup *before* this runs so the
+/// synthetic keystrokes target the source app, not ClipSnap itself.
+pub fn diagnose_at_cursor(db: &DbHandle) -> Result<DiagnoseResult> {
+    // 1) Save the current clipboard text.
+    let saved = read_clipboard_text();
+
+    // 2) Select the previous word and copy.
+    select_previous_word()?;
+    thread::sleep(Duration::from_millis(30));
+    send_copy()?;
+    thread::sleep(Duration::from_millis(80));
+
+    // 3) Read what got captured.
+    let captured_raw = read_clipboard_text().unwrap_or_default();
+    let captured = trim_abbreviation(&captured_raw).to_string();
+
+    // 4) Restore clipboard *before* doing the DB lookup, so even if the
+    //    lookup is slow, the user's clipboard is back quickly.
+    restore_clipboard(saved.as_deref());
+
+    let mut result = DiagnoseResult {
+        captured: captured.clone(),
+        matched_abbreviation: None,
+        paste_preview: None,
+    };
+
+    if !captured.is_empty() {
+        if let Some(snippet) = snippets::find_by_exact_abbreviation(db, &captured)? {
+            // First 80 chars of the body, single-line preview.
+            let preview: String = snippet
+                .body
+                .replace('\n', " ")
+                .chars()
+                .take(80)
+                .collect();
+            result.matched_abbreviation = Some(snippet.abbreviation);
+            result.paste_preview = Some(preview);
+        }
+    }
+
+    Ok(result)
+}
+
+/// Run a full expand-at-cursor cycle. Errors are returned for logging but
+/// the orchestration layer (the hotkey handler) treats them as recoverable
+/// — the next press starts a fresh attempt.
+pub fn expand_at_cursor(db: &DbHandle) -> Result<()> {
+    // 1) Save current clipboard text (best-effort).
+    let saved = read_clipboard_text();
+
+    // 2) Select the previous word, then copy it.
+    select_previous_word()?;
+    thread::sleep(Duration::from_millis(30));
+    send_copy()?;
+    thread::sleep(Duration::from_millis(80));
+
+    // 3) Read the just-selected word.
+    let abbr_raw = read_clipboard_text().unwrap_or_default();
+    let abbr = trim_abbreviation(&abbr_raw);
+    if abbr.is_empty() {
+        restore_clipboard(saved.as_deref());
+        return Ok(());
+    }
+
+    // 4) Look it up.
+    let hit = snippets::find_by_exact_abbreviation(db, abbr)?;
+    let Some(snippet) = hit else {
+        // Selection stays highlighted in the source app — visual cue that
+        // nothing matched. Restore the user's clipboard before bailing.
+        restore_clipboard(saved.as_deref());
+        return Ok(());
+    };
+
+    // 5) Replace selection: write the body, paste over the highlight.
+    write_clipboard_text(&snippet.body)?;
+    thread::sleep(Duration::from_millis(30));
+    send_paste()?;
+
+    // 6) Restore the user's original clipboard after the paste has
+    //    consumed the snippet body. The delay is generous — too short and
+    //    the source app may end up pasting the *restored* clipboard.
+    thread::sleep(Duration::from_millis(150));
+    restore_clipboard(saved.as_deref());
+
+    Ok(())
+}
+
+/// Trim common boundary characters that the platform may include in the
+/// "previous word" selection (trailing space the user typed after the
+/// abbreviation, NBSP, newlines, …).
+fn trim_abbreviation(raw: &str) -> &str {
+    raw.trim_matches(|c: char| c.is_whitespace() || c == '\u{00A0}')
+}
+
+fn read_clipboard_text() -> Option<String> {
+    let ctx = ClipboardContext::new().ok()?;
+    ctx.get_text().ok()
+}
+
+fn write_clipboard_text(text: &str) -> Result<()> {
+    let ctx = ClipboardContext::new()
+        .map_err(|e| anyhow!("clipboard ctx init failed: {e:?}"))?;
+    ctx.set_text(text.to_string())
+        .map_err(|e| anyhow!("set_text failed: {e:?}"))?;
+    Ok(())
+}
+
+fn restore_clipboard(saved: Option<&str>) {
+    if let Some(text) = saved {
+        let _ = write_clipboard_text(text);
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn word_modifier() -> Key {
+    // On macOS Option == Alt, both physically and in enigo's mapping.
+    Key::Alt
+}
+#[cfg(not(target_os = "macos"))]
+fn word_modifier() -> Key {
+    Key::Control
+}
+
+#[cfg(target_os = "macos")]
+fn cmd_modifier() -> Key {
+    Key::Meta
+}
+#[cfg(not(target_os = "macos"))]
+fn cmd_modifier() -> Key {
+    Key::Control
+}
+
+fn select_previous_word() -> Result<()> {
+    let mut e = Enigo::new(&Settings::default())
+        .map_err(|err| anyhow!("enigo init failed: {err:?}"))?;
+    let modifier = word_modifier();
+    e.key(modifier, Press)
+        .map_err(|err| anyhow!("modifier press: {err:?}"))?;
+    e.key(Key::Shift, Press)
+        .map_err(|err| anyhow!("shift press: {err:?}"))?;
+    e.key(Key::LeftArrow, Press)
+        .map_err(|err| anyhow!("left press: {err:?}"))?;
+    e.key(Key::LeftArrow, Release)
+        .map_err(|err| anyhow!("left release: {err:?}"))?;
+    e.key(Key::Shift, Release)
+        .map_err(|err| anyhow!("shift release: {err:?}"))?;
+    e.key(modifier, Release)
+        .map_err(|err| anyhow!("modifier release: {err:?}"))?;
+    Ok(())
+}
+
+fn send_copy() -> Result<()> {
+    send_modified_letter('c')
+}
+
+fn send_paste() -> Result<()> {
+    send_modified_letter('v')
+}
+
+fn send_modified_letter(letter: char) -> Result<()> {
+    let mut e = Enigo::new(&Settings::default())
+        .map_err(|err| anyhow!("enigo init failed: {err:?}"))?;
+    let m = cmd_modifier();
+    e.key(m, Press)
+        .map_err(|err| anyhow!("modifier press: {err:?}"))?;
+    e.key(Key::Unicode(letter), Press)
+        .map_err(|err| anyhow!("letter press: {err:?}"))?;
+    e.key(Key::Unicode(letter), Release)
+        .map_err(|err| anyhow!("letter release: {err:?}"))?;
+    e.key(m, Release)
+        .map_err(|err| anyhow!("modifier release: {err:?}"))?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::settings;
+
+    #[test]
+    fn trim_abbreviation_strips_surrounding_whitespace() {
+        assert_eq!(trim_abbreviation("  mfg  "), "mfg");
+        assert_eq!(trim_abbreviation("mfg\n"), "mfg");
+        assert_eq!(trim_abbreviation("\u{00A0}mfg"), "mfg");
+        assert_eq!(trim_abbreviation("mfg"), "mfg");
+        assert_eq!(trim_abbreviation(""), "");
+        assert_eq!(trim_abbreviation("   "), "");
+    }
+
+    #[test]
+    fn settings_constants_match_documented_keys() {
+        // Sanity check — these strings are referenced from the frontend
+        // settings UI, so they're effectively part of our public API.
+        assert_eq!(KEY_HOTKEY, "expander.hotkey");
+        assert_eq!(KEY_ENABLED, "expander.enabled");
+        assert_eq!(DEFAULT_HOTKEY, "Alt+Backquote");
+    }
+
+    #[test]
+    fn settings_module_round_trip_for_expander_keys() {
+        // Belt-and-braces: ensure the keys we export are usable with the
+        // settings store.
+        use parking_lot::Mutex;
+        use rusqlite::Connection;
+        use std::sync::Arc;
+
+        let conn = Connection::open_in_memory().unwrap();
+        let db = Arc::new(Mutex::new(conn));
+        settings::init_table(&db).unwrap();
+
+        assert_eq!(
+            settings::get_or(&db, KEY_HOTKEY, DEFAULT_HOTKEY).unwrap(),
+            DEFAULT_HOTKEY
+        );
+        assert!(settings::get_bool(&db, KEY_ENABLED, false).unwrap() == false);
+
+        settings::set(&db, KEY_HOTKEY, "Ctrl+Shift+E").unwrap();
+        settings::set(&db, KEY_ENABLED, "true").unwrap();
+        assert_eq!(
+            settings::get_or(&db, KEY_HOTKEY, DEFAULT_HOTKEY).unwrap(),
+            "Ctrl+Shift+E"
+        );
+        assert!(settings::get_bool(&db, KEY_ENABLED, false).unwrap());
+    }
+}

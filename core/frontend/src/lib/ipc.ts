@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { ClipEntry, Snippet } from "./types";
+import type { BackupImportResult, ClipEntry, Note, Snippet } from "./types";
 
 // ── Clipboard history ────────────────────────────────────────────────────────
 
@@ -33,6 +33,12 @@ export function getCaptureState(): Promise<boolean> {
 
 export function hidePopup(): Promise<void> {
   return invoke("hide_popup");
+}
+
+/** Write `text` to the OS clipboard and paste it into the previously
+ *  active app. Used by the inline calculator. */
+export function pasteText(text: string): Promise<void> {
+  return invoke("paste_text", { text });
 }
 
 /** Tell the backend to (not) auto-hide the popup on blur. Use while a
@@ -83,4 +89,153 @@ export function importSnippets(json: string): Promise<ImportResult> {
 /** Read a JSON file from the given path and import its snippets. */
 export function importSnippetsFromFile(path: string): Promise<ImportResult> {
   return invoke("import_snippets_from_file", { path });
+}
+
+// ── Notes ────────────────────────────────────────────────────────────────────
+
+export function listNotes(): Promise<Note[]> {
+  return invoke("list_notes");
+}
+
+export function listNoteCategories(): Promise<string[]> {
+  return invoke("list_note_categories");
+}
+
+/** Promote a clipboard entry to a persistent note. Returns the new note id. */
+export function saveClipAsNote(
+  clipId: number,
+  title: string,
+  category: string,
+): Promise<number> {
+  return invoke("save_clip_as_note", { clipId, title, category });
+}
+
+/** Create a from-scratch text note. Returns the new note id. */
+export function createNote(
+  title: string,
+  body: string,
+  category: string,
+): Promise<number> {
+  return invoke("create_note", { title, body, category });
+}
+
+/** Update a note's title / body / category. Body edits are ignored for
+ *  image and files notes (the backend short-circuits). */
+export function updateNote(
+  id: number,
+  title: string,
+  body: string,
+  category: string,
+): Promise<void> {
+  return invoke("update_note", { id, title, body, category });
+}
+
+export function deleteNote(id: number): Promise<void> {
+  return invoke("delete_note", { id });
+}
+
+export function clearNotes(): Promise<void> {
+  return invoke("clear_notes");
+}
+
+export function pasteNote(id: number): Promise<void> {
+  return invoke("paste_note", { id });
+}
+
+// ── Backup (full app export / import) ────────────────────────────────────────
+
+/** Returns a pretty-printed JSON string covering history + snippets + notes. */
+export function exportBackup(): Promise<string> {
+  return invoke("export_backup");
+}
+
+/** Build the backup JSON and write it directly to `path`. Returns
+ *  the number of bytes written. */
+export function saveBackupToFile(path: string): Promise<number> {
+  return invoke("save_backup_to_file", { path });
+}
+
+// ── Text expander ────────────────────────────────────────────────────────────
+
+export interface ExpanderConfig {
+  enabled: boolean;
+  /** Tauri shortcut string, e.g. "Alt+Backquote", "Ctrl+Shift+E". */
+  hotkey: string;
+  /** True if the OS has granted ClipSnap permission to synthesize keyboard
+   *  events. macOS: Accessibility. Other OSes: always true. */
+  accessibility_granted: boolean;
+}
+
+export function getExpanderConfig(): Promise<ExpanderConfig> {
+  return invoke("get_expander_config");
+}
+
+/** Persist a new expander config and re-register the hotkey. The backend
+ *  validates the hotkey string and errors out *before* writing settings if
+ *  it's malformed, so the previous registration stays intact on failure. */
+export function setExpanderConfig(
+  enabled: boolean,
+  hotkey: string,
+): Promise<ExpanderConfig> {
+  return invoke("set_expander_config", { enabled, hotkey });
+}
+
+/** Programmatically trigger an expand-at-cursor cycle. Used by the
+ *  "Test now" button in settings. */
+export function triggerExpandAtCursor(): Promise<void> {
+  return invoke("trigger_expand_at_cursor");
+}
+
+export interface DiagnoseResult {
+  captured: string;
+  matched_abbreviation: string | null;
+  paste_preview: string | null;
+}
+
+/** Capture the word before the cursor (select prev word + copy) and run
+ *  the snippet lookup, but *don't* paste. Hides the popup first so the
+ *  synthetic keystrokes target the prior frontmost app. Returns the raw
+ *  captured text and the matched snippet abbreviation, if any. */
+export function diagnoseExpandAtCursor(): Promise<DiagnoseResult> {
+  return invoke("diagnose_expand_at_cursor");
+}
+
+/** Cheap probe — returns true if synthetic-input permission is granted
+ *  (macOS Accessibility / other OSes always true). Used for polling
+ *  while the user is in System Settings granting access. */
+export function getAccessibilityStatus(): Promise<boolean> {
+  return invoke("get_accessibility_status");
+}
+
+/** Triggers the macOS "would like to control this computer" dialog and
+ *  adds ClipSnap to the Accessibility list. Returns the still-likely-
+ *  false trusted state immediately after the prompt fires. No-op on
+ *  Windows / Linux. */
+export function requestAccessibilityGrant(): Promise<boolean> {
+  return invoke("request_accessibility_grant");
+}
+
+/** Opens System Settings → Privacy & Security → Accessibility on macOS
+ *  via `open x-apple.systempreferences:…`. No-op on other OSes. */
+export function openAccessibilitySettings(): Promise<void> {
+  return invoke("open_accessibility_settings");
+}
+
+/** Quit the app process. Used after granting Accessibility on macOS so
+ *  the next launch picks up the fresh AXIsProcessTrusted state. */
+export function quitApp(): Promise<void> {
+  return invoke("quit_app");
+}
+
+/** Spawn a fresh ClipSnap process and exit the current one. Used by the
+ *  Settings panel's auto-restart prompt: the new process picks up the
+ *  freshly granted Accessibility state which the running process can't
+ *  see (macOS caches the trust check per-process). */
+export function relaunchApp(): Promise<void> {
+  return invoke("relaunch_app");
+}
+
+/** Read a backup JSON file from `path` and merge it into the live database. */
+export function importBackup(path: string): Promise<BackupImportResult> {
+  return invoke("import_backup", { path });
 }

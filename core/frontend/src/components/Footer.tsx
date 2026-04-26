@@ -1,9 +1,12 @@
 interface Props {
   index: number;
   total: number;
+  /** App version, e.g. "0.2.6". Rendered as `v0.2.6` next to the counter
+   *  when provided. Optional so unit tests don't need a Tauri context. */
+  version?: string;
 }
 
-export function Footer({ index, total }: Props) {
+export function Footer({ index, total, version }: Props) {
   const label = total === 0 ? "0/0" : `${index + 1}/${total}`;
   return (
     <div className="flex h-8 items-center justify-between border-t border-[var(--color-border)] px-4 text-[11px] text-[var(--color-muted)]">
@@ -12,7 +15,14 @@ export function Footer({ index, total }: Props) {
         <Hint k="↑↓" label="Navigate" />
         <Hint k="Esc" label="Close" />
       </div>
-      <div>{label}</div>
+      <div className="flex items-center gap-3">
+        {version && (
+          <span title="ClipSnap version" className="font-[var(--font-mono)]">
+            v{version}
+          </span>
+        )}
+        <span>{label}</span>
+      </div>
     </div>
   );
 }

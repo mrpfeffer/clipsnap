@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { Zap } from "lucide-react";
+import { Calculator, Zap } from "lucide-react";
 import type { ListEntry } from "../lib/types";
 import { formatBytes } from "../lib/format";
 
@@ -21,6 +21,28 @@ export function PreviewPanel({ entry }: Props) {
     return (
       <div className="flex h-full items-center justify-center text-[13px] text-[var(--color-muted)]">
         Select an entry
+      </div>
+    );
+  }
+
+  // ── Calc preview ───────────────────────────────────────────────────────────
+  if (entry.kind === "calc") {
+    return (
+      <div className="flex h-full flex-col p-4">
+        <div className="mb-3 flex items-center gap-2 text-[11px] uppercase tracking-wide text-[var(--color-muted)]">
+          <Calculator size={12} className="text-[var(--color-accent)]" />
+          <span>calculator</span>
+          <span>·</span>
+          <span>press Enter to paste result</span>
+        </div>
+        <div className="flex flex-1 flex-col items-stretch justify-center gap-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-6">
+          <div className="text-center font-[var(--font-mono)] text-[14px] text-[var(--color-muted)]">
+            {entry.data.expression}
+          </div>
+          <div className="text-center font-[var(--font-mono)] text-[28px] font-semibold leading-tight">
+            = {entry.data.display}
+          </div>
+        </div>
       </div>
     );
   }

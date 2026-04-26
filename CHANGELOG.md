@@ -4,6 +4,168 @@ All notable changes to ClipSnap are documented here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.10] — 2026-04-26
+
+### Fixed
+
+- **macOS Accessibility re-grant loop is finally broken.** Real root cause this time, not symptoms: macOS Tahoe (26.x) binds the TCC Accessibility grant to the tuple `(bundle id, cdhash)`. `scripts/install-macos.sh` previously ran `codesign --force` on every install — even when the user re-installed an *unchanged* binary — which embedded a fresh CMS timestamp into the signature blob and produced a new cdhash. macOS then dropped the prior grant, prompting again. — *#fix(macos)*
+  - **Idempotent install.** The script now SHA-256 compares the freshly built binary at `target/release/bundle/macos/ClipSnap.app/Contents/MacOS/clipsnap` against the currently installed binary at `/Applications/ClipSnap.app/Contents/MacOS/clipsnap`. If they're identical (and the bundle identifier already matches), the script **skips both `cp` and `codesign`** entirely — your install is preserved verbatim, the cdhash stays stable, and your TCC grant survives. Net effect: rebuilds without source changes never ask you to re-grant.
+  - **Cleaner re-sign output.** When source *did* change, the script now prints both old and new SHA-256 prefixes plus the resulting cdhash, with an explicit "TCC grant must be re-given" warning so you know what to expect.
+- **Wrong entitlement removed.** `com.apple.security.automation.apple-events` was misleadingly attached "for enigo to simulate paste" but actually covers AppleScript automation (NSAppleEvent / OSAScript), not `CGEventPost`-style synthetic input. Worse, on macOS Tahoe with Hardened Runtime its presence can trigger an unrelated TCC "Automation" prompt and confuse the permission flow. Removed from `macos/src-tauri/entitlements.plist`. The remaining three entitlements (`allow-jit`, `allow-unsigned-executable-memory`, `disable-library-validation`) correctly cover WebKit / Tauri plugin loading.
+
+### Added
+
+- **Auto-restart prompt after grant detected.** The Settings panel's polling loop now distinguishes the false→true transition of `accessibility_granted`. When it fires, an inline emerald-bordered prompt appears: **"Access detected — one more step"** with a **Restart now** button. Click → ClipSnap spawns a fresh `/Applications/ClipSnap.app` process via `open -n` and exits cleanly. The new instance picks up the just-granted TCC state correctly (the running process couldn't, because macOS caches `AXIsProcessTrusted()` per-process). Total post-grant flow: ~30 seconds, one click. — *#feat(settings)*
+  - New `relaunch_app` IPC command in `core/rust-lib/src/commands.rs`.
+  - `relaunchApp()` wrapper in `core/frontend/src/lib/ipc.ts`.
+- **"Why does this keep happening?" disclosure** in the amber banner of the Settings panel, explaining the cdhash binding in plain language so users understand the constraint instead of feeling gaslit by the OS.
+
+### Changed
+
+- **`[profile.release]`** at the workspace root: `codegen-units = 1`, `lto = true`, `strip = "debuginfo"`, `opt-level = 3`. Won't make Rust release builds fully byte-reproducible, but reduces non-determinism so the SHA-256 idempotency check has a fighting chance for trivial source changes.
+- **`scripts/install-macos.sh`** — full restructure with helper functions (`bin_sha256`, `cdhash`, `current_identifier`, `kill_running`, `resign_app`, `reset_tcc`) and clearer printed status. The script's docstring at the top now accurately describes the cdhash binding and how the idempotent path works.
+- **`macos/README.md`** "Why the dialog re-appears" section rewritten with the honest truth instead of the previous wishful "Sequoia and earlier accept this; later releases may still re-prompt." Now says: every meaningful rebuild requires re-grant on Tahoe; the script + auto-restart prompt make it bearable; the only permanent fix is an Apple Developer ID.
+
+### Verification recipe
+
+```bash
+# 1) idempotent rebuild preserves grant
+bash scripts/install-macos.sh        # initial install
+# … grant Accessibility once via Settings panel banner …
+bash scripts/install-macos.sh        # re-run with no source changes
+#   ⇒ prints "Binary unchanged — keeping existing install"
+#   ⇒ green banner stays green; Diagnose works without intervention
+
+# 2) source change triggers single re-grant
+echo "// touch" >> core/rust-lib/src/lib.rs
+bash scripts/install-macos.sh
+#   ⇒ prints "Binary changed — full reinstall"
+#   ⇒ amber banner appears in Settings tab
+#   ⇒ click Open System Settings → enable toggle → switch back
+#   ⇒ green "Restart now" prompt appears within 1 s
+#   ⇒ one click → app relaunches → Diagnose works
+```
+
+## [0.2.9] — 2026-04-26
+
+### Added
+
+- **Accessibility status badge in the Settings panel** — green when ClipSnap has macOS Accessibility access, amber when it doesn't, with an inline explainer of what to do. Polled once per second while not granted, so the badge flips to green within ~1 s of the user toggling ClipSnap on in System Settings — no panel reload needed. — *#feat(settings)*
+- **`Test now` button** in the Settings panel — runs the full expand-at-cursor cycle without using the hotkey after a 2-second grace period (long enough to switch back to the source app and place the cursor after an abbreviation). Lets you tell whether the *hotkey* is the problem or the *expansion logic* is. Wired through the existing `trigger_expand_at_cursor` IPC.
+- **`get_accessibility_status` Tauri command** + `ExpanderConfig.accessibility_granted` field — backed by macOS `AXIsProcessTrusted()` via FFI to `ApplicationServices.framework`. Returns `true` unconditionally on Windows / Linux, where synthetic input is either ungated or gated by a different mechanism.
+
+### Fixed
+
+- **`scripts/install-macos.sh`** — new helper that builds + re-signs ClipSnap with a stable ad-hoc identifier (`io.celox.clipsnap`) before copying into `/Applications`. Without an Apple Developer ID, every fresh `pnpm build:macos` produced a *random* identifier (e.g. `clipsnap-c64f925d…`); macOS TCC then treated the rebuild as a brand-new app and discarded the previous Accessibility grant. The script's stable identifier lets the grant survive across rebuilds (where macOS allows bundle-id matching), and `--reset` runs `tccutil reset` to wipe stale carcass entries when needed.
+- **macOS README** — new "Why the dialog re-appears after every rebuild" section explaining TCC binding to code-signature, plus how to use `install-macos.sh`.
+
+## [0.2.8] — 2026-04-26
+
+### Fixed
+
+- **Expander hotkey capture failed for the `^` key on German ISO macOS keyboards.** WebKit reports the top-left key (`^`/`°`) as `event.code = "IntlBackslash"`, but the Tauri `tauri-plugin-global-shortcut` parser (`Shortcut::from_str`) maintains a hand-written allow-list that doesn't include any `Intl…` codes — the captured combo `Alt+IntlBackslash` was rejected with `UnsupportedKey("IntlBackslash")`. Two-part fix: — *#fix(expander)*
+  - **Frontend** (`HotkeyCapture.tsx`) — new `normalizeCode()` maps WebKit's `IntlBackslash` back to `Backquote` (the layout-stable W3C name; same Carbon virtual keycode `kVK_ANSI_Grave` = 0x32 the OS will see at hotkey time).
+  - **Backend** (`hotkey::parse_shortcut`) — replaces the plugin's narrow parser with our own. Routes the code token through `keyboard_types::Code::from_str`, which understands the **full** W3C `KeyboardEvent.code` spec. Future-proofs against other gaps in the plugin's allow-list (`IntlBackquote`, `IntlRo`, `IntlYen`, less-common media keys, …).
+  - 9 new unit tests for the parser (modifier aliases, `IntlBackslash` accept, single-key, error cases). Backend tests: 62 → **71 green**.
+- **HotkeyCapture button never recorded on macOS.** Safari/WebKit does **not** focus a `<button>` on click, so the button-level `onKeyDown` never fired. The capture indicator stayed at "Press a key combination…" forever. Fix: while capturing, attach a window-level keydown listener in *capture phase* — wins over the global keyboard-nav hook (which would otherwise consume Esc as "close popup"). — *#fix(settings)*
+- **Search bar placeholder + Notes/Snippets/Settings titles ran behind the absolutely-positioned tab strip.** With four tabs (after Settings was added in 0.2.7) the strip overlapped the input. Fix: reserve `pr-[260px]` on the search bar and on the inactive-tab title row, tighten tab buttons to `px-2 whitespace-nowrap`, shorten the placeholder to `Search or calculate…`. — *#fix(ui)*
+
+### Added
+
+- **Per-row delete + Clear all** for clipboard history. Hover any clip row in the History tab → trash icon appears next to the bookmark icon → one click removes that single entry. A new toolbar at the top of the history list shows the clip count and a **Clear all** button (with `window.confirm` guard) for nuking everything at once. Wired through the existing `delete_entry` / `clear_history` IPC commands. — *#feat(history)*
+
+### Changed
+
+- `useClipboardHistory` now exposes its `refresh` callback to `App.tsx` so the list refetches immediately after delete/clear-all instead of waiting for the next `clipboard-changed` event.
+
+## [0.2.7] — 2026-04-25
+
+### Added
+
+- **System-wide text expander.** Type a snippet abbreviation in any text field — code editor, browser, mail client, Slack — then press the configured hotkey, and ClipSnap replaces the abbreviation in place with the snippet body. Default hotkey is `Alt+Backquote` (the `^` key on a German keyboard, ` on US). Disabled by default — opt in from the new **Settings** tab. — *#feat(expander)*
+  - **How it works:** the popup stays out of the way. ClipSnap synthesizes `Cmd/Ctrl+Shift+←` (select previous word) → `Cmd/Ctrl+C` (copy), looks the captured word up in the snippets table via the new `find_by_exact_abbreviation` (case-sensitive first, case-insensitive fallback), writes the body to the clipboard, and synthesizes `Cmd/Ctrl+V`. The user's clipboard is saved before the cycle and restored after.
+  - **Trigger semantics, not silent watch.** No global keylogger — you decide when to expand.
+  - **Configurable hotkey.** New **Settings** tab → click the hotkey field → press your combination (Backspace clears, Esc cancels). The string is stored in the new `settings` SQLite table and re-registered with the OS via `tauri-plugin-global-shortcut`. Bad combinations are rejected before the previous registration is touched, so you can't accidentally lose your hotkey to a typo.
+  - **Cross-platform.** macOS / Windows / Linux X11 work the same. Linux Wayland depends on the compositor's global-shortcut portal (GNOME/KDE OK; sway-flavoured stacks may not).
+  - Full reference: [`docs/text-expander.md`](./docs/text-expander.md).
+- **Settings tab** in the popup, alongside History · Snippets · Notes. Designed to grow — first home for the expander toggle + hotkey capture; future settings (capture pause defaults, image-size cap, …) will land here.
+- **`settings` SQLite table** — new key/value store via `core/rust-lib/src/settings.rs`. Idempotent migration; created on first launch of v0.2.7.
+- **`HotkeyCapture` React component** that converts a `KeyboardEvent` into the W3C-code shortcut format the global-shortcut plugin's parser expects (`Modifier+...+Code`).
+- **14 new Rust unit tests** — settings store roundtrip (6), `snippets::find_by_exact_abbreviation` semantics (5), expander helpers (3). `cargo test --workspace`: 48 → **62**.
+
+### Changed
+
+- IPC surface gains `get_expander_config`, `set_expander_config`, `trigger_expand_at_cursor`. The latter is a programmatic alternative to the hotkey — useful for testing and for any future tray-menu entry.
+- `hotkey.rs` gains `ExpanderShortcutState` (Tauri-managed) and `register_expander(...)`, which idempotently swaps the previously-registered expander shortcut. Runs the actual expansion on a worker thread so the global-shortcut callback returns instantly (avoids platform-specific deadlocks).
+
+### Caveats — what *won't* work cleanly
+
+These are documented in [`docs/text-expander.md`](./docs/text-expander.md), surfaced in the Settings panel's "How it works" disclosure:
+
+- **Terminals** (iTerm2, kitty, gnome-terminal) sometimes interpret `Cmd/Ctrl+Shift+←` as a pane-switch / mark-selection — the expander may grab the wrong "word" or nothing at all.
+- **Password fields** in many apps refuse synthetic paste; the abbreviation gets selected but the body never lands.
+- **Linux Wayland** in restrictive compositors blocks global shortcuts entirely.
+- **Image / files snippets** are not supported by the expander (the orchestration only handles text). This is intentional for v1.
+
+## [0.2.6] — 2026-04-25
+
+### Added
+
+- **Notes — a third tab for persistent, categorized clipboard items.** Notes live in their own SQLite table and are *not* affected by the 1 000-entry pruning of the clipboard history, so they're the right place for things you want to keep. — *#feat(notes)*
+  - Three-pane layout: **Categories sidebar** (with note counts per category, plus virtual `All` and `Uncategorized` groups), **note list**, and **detail/edit pane**.
+  - **Free-form categories** — typing a new category name in the edit form auto-creates it; the input has a `<datalist>` for autocomplete from existing categories.
+  - **Editable bodies** for `text`, `html`, `rtf` notes; `image` and `files` notes are read-only (you can still rename them and change category). The detail pane renders images inline and shows file paths as a list.
+  - **Paste from a note** preserves the original content type — image notes paste as images, HTML notes paste as HTML, etc.
+- **Star button on history rows** — hover any clipboard entry in the History tab and the bookmark icon appears next to the timestamp; one click promotes the entry to a note in the `Uncategorized` bucket. The note is decoupled from the clip thereafter, so even if the clip gets pruned out of history, the note stays.
+- **Full-app backup** — Notes tab toolbar gets `Export…` and `Import…` actions wired through `tauri-plugin-dialog`. Export writes a single pretty-printed JSON file (`{ version, exported_at, history, snippets, notes }`); import merges that file back into the live database with sensible per-table semantics:
+  - **Snippets** — upsert by `abbreviation` (existing rows are overwritten).
+  - **History** — upsert by SHA-256 hash; duplicates just bump `last_used_at`, new rows respect the existing 1 000-entry cap.
+  - **Notes** — appended verbatim with original timestamps preserved (no natural dedup key, so re-importing the same backup creates duplicates — use Clear All first if you want a clean replace).
+- **`Clear All` for notes**, with a `window.confirm` guard.
+- **Tray menu entry “Manage Notes”** — opens the popup directly on the Notes tab via a new `open-notes-tab` event.
+- **15 new Rust unit tests** for the notes module (CRUD, categories, save_from_clip, image-note read-only update) and the backup module (roundtrip into empty db, merge into populated db, version-rejection guard, replace-all). `cargo test --workspace` is now **48 → was 33**.
+
+### Changed
+
+- `paste.rs::write_to_clipboard` was refactored to take primitives `(content_type, data, text)` instead of a `&ClipEntry`, exposed via the new public `paste::paste_payload(...)`. This lets the `paste_note` IPC command paste any content type without needing to construct a fake `ClipEntry`.
+- New IPC commands wired into `invoke_handler`: `list_notes`, `list_note_categories`, `save_clip_as_note`, `create_note`, `update_note`, `delete_note`, `clear_notes`, `paste_note`, `export_backup`, `save_backup_to_file`, `import_backup`.
+- New permissions in both shells' `capabilities/default.json`: `dialog:allow-save` (for the export file picker).
+
+### Database
+
+- New table on first launch (idempotent `CREATE TABLE IF NOT EXISTS`):
+  ```sql
+  CREATE TABLE notes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      content_type TEXT NOT NULL,
+      content_text TEXT NOT NULL DEFAULT '',
+      content_data TEXT NOT NULL DEFAULT '',
+      title        TEXT NOT NULL DEFAULT '',
+      category     TEXT NOT NULL DEFAULT '',
+      byte_size    INTEGER NOT NULL DEFAULT 0,
+      created_at   INTEGER NOT NULL,
+      updated_at   INTEGER NOT NULL
+  );
+  ```
+  Indexed on `category` and `updated_at DESC`.
+
+## [0.2.5] — 2026-04-25
+
+### Added
+
+- **Inline calculator in the search field** — Alfred-style. As you type, ClipSnap evaluates the input as a math expression and shows the result as the top list item; press Enter to paste the result into the previously active app. Bare numbers (`42`) and plain text (`hello`) are ignored; only inputs with at least one operator, function call, or named constant trigger calc mode. A leading `=` forces evaluation (so `=42` or `=pi` displays a result for a single literal). — *#feat(calc)*
+  - Supported operators: `+ - * / % ^` (power is right-associative), unary `+`/`-`, parens.
+  - Supported numbers: integers, decimals (`0.5`, `.5`), scientific (`1e3`, `1.5e-2`), digit grouping (`1_000`).
+  - Constants: `pi` / `π`, `tau`, `e`.
+  - Functions: `sqrt`, `cbrt`, `abs`, `sign`, `floor`, `ceil`, `round`, `ln`, `log` (base 10), `log2`, `exp`, `sin`/`cos`/`tan` (radians), `asin`/`acos`/`atan`/`atan2`, `sinh`/`cosh`/`tanh`, `min`, `max`, `pow`, `mod`.
+- **`paste_text(text)` Tauri command** — generic "compute & paste" entry point used by the calculator (and available for future flows like unit-conversion / date-math). Hides the popup, writes `text` to the clipboard, and synthesizes Cmd+V / Ctrl+V via `enigo`, same as the existing snippet-paste path.
+- **27 new vitest cases** for `tryEvaluate` and `formatResult` covering precedence, right-associative power, parens, decimals + scientific notation, every supported function/constant, `=`-forced evaluation, and rejection of plain numbers / malformed input. (`pnpm test`: 24 → 51 frontend tests.)
+
+### Changed
+
+- **Search field rebranded as a general input.** Placeholder is now `Search history or type an expression (2+2, sqrt(16), …)`. The leading icon is a chevron by default and switches to a calculator glyph the moment the input parses as a math expression — making the field read as an entry box, not just a search box.
+- New `CalcEntry` variant in `ListEntry`; `HistoryItem` renders calc rows with a `calc` chip and `expr = result` formatting in monospace, `PreviewPanel` shows a centered large `= result` view.
+
 ## [0.2.4] — 2026-04-25
 
 ### Fixed
@@ -108,6 +270,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - System tray menu: Open · Pause Capture · Clear History · Start with Windows · Quit.
 - pnpm + Cargo workspaces with shared [`core/`](./core) and [`win/`](./win) bundle shell.
 
+[0.2.10]: https://github.com/pepperonas/clipsnap/releases/tag/v0.2.10
+[0.2.9]: https://github.com/pepperonas/clipsnap/releases/tag/v0.2.9
+[0.2.8]: https://github.com/pepperonas/clipsnap/releases/tag/v0.2.8
+[0.2.7]: https://github.com/pepperonas/clipsnap/releases/tag/v0.2.7
+[0.2.6]: https://github.com/pepperonas/clipsnap/releases/tag/v0.2.6
+[0.2.5]: https://github.com/pepperonas/clipsnap/releases/tag/v0.2.5
 [0.2.4]: https://github.com/pepperonas/clipsnap/releases/tag/v0.2.4
 [0.2.3]: https://github.com/pepperonas/clipsnap/releases/tag/v0.2.3
 [0.2.2]: https://github.com/pepperonas/clipsnap/releases/tag/v0.2.2

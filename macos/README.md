@@ -63,6 +63,29 @@ Auto-paste uses synthesized `Cmd+V` keystrokes via [`enigo`](https://docs.rs/eni
 
 Without Accessibility access the popup still opens and you can read entries, but `Enter` will not paste into the previous app.
 
+#### Why the dialog re-appears after every rebuild — and how it's mitigated
+
+macOS TCC binds the Accessibility grant to the app's **(bundle id, cdhash)** tuple. On macOS Sequoia (15) and Tahoe (26) this binding is *strict* — when the cdhash changes, the grant is dropped. Without an Apple Developer ID, ClipSnap is ad-hoc-signed; re-signing is needed for a stable bundle id, but each `codesign` invocation embeds a fresh CMS timestamp **and** Rust release builds aren't byte-reproducible, so naïvely re-signing on every install gives a new cdhash every time → grant invalidated.
+
+The `scripts/install-macos.sh` helper handles this in two ways:
+
+1. **Idempotent install.** It SHA-256 compares the freshly built binary to whatever is currently installed at `/Applications/ClipSnap.app`. If they're identical (and the bundle identifier already matches), the script **skips both `cp` and `codesign`** — your install is preserved verbatim, the cdhash stays stable, and your TCC grant survives. Net effect: rebuilding without source changes never asks you to re-grant.
+2. **Auto-restart prompt.** When real source changes do produce a new cdhash, the in-app **Settings tab** detects the missing grant, walks you through enabling ClipSnap in System Settings, and automatically prompts to relaunch ClipSnap with one click as soon as it sees the toggle flip on. Total round-trip: ~30 seconds.
+
+```bash
+# Build (or rebuild) and install. Re-grant only required if the binary
+# actually changed.
+bash scripts/install-macos.sh
+
+# Wipe stale TCC entries first — useful after multiple zombie ClipSnap
+# entries pile up in System Settings from old builds.
+bash scripts/install-macos.sh --reset
+```
+
+The script prints the cdhash at the end so you can confirm at a glance whether your grant will survive.
+
+The honest, *permanent* fix to this re-grant churn is an Apple Developer ID (~$99/year). With a Developer-ID signature, TCC matches on (Team ID + bundle id) — Apple's signature anchors trust independently of cdhash, so source changes don't invalidate the grant. ClipSnap is currently distributed as ad-hoc-signed builds, so this is left as a personal choice.
+
 ## Usage
 
 | Action         | Keys                       |

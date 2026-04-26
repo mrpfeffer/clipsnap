@@ -1,5 +1,6 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
+import { Trash2 } from "lucide-react";
 import { HistoryItem } from "./HistoryItem";
 import type { ListEntry } from "../lib/types";
 
@@ -8,11 +9,25 @@ interface Props {
   selectedIndex: number;
   onSelect: (i: number) => void;
   onActivate: (i: number) => void;
+  /** Save-as-note handler: invoked on the bookmark icon for a clipboard entry. */
+  onSaveAsNote?: (i: number) => void;
+  /** Delete handler: invoked on the trash icon for a clipboard entry. */
+  onDeleteClip?: (i: number) => void;
+  /** Clear-all-history handler: invoked from the toolbar button at the top. */
+  onClearAll?: () => void;
 }
 
 const ROW_HEIGHT = 36;
 
-export function HistoryList({ entries, selectedIndex, onSelect, onActivate }: Props) {
+export function HistoryList({
+  entries,
+  selectedIndex,
+  onSelect,
+  onActivate,
+  onSaveAsNote,
+  onDeleteClip,
+  onClearAll,
+}: Props) {
   const parentRef = useRef<HTMLDivElement>(null);
 
   const virtualizer = useVirtualizer({
@@ -28,45 +43,87 @@ export function HistoryList({ entries, selectedIndex, onSelect, onActivate }: Pr
     }
   }, [selectedIndex, virtualizer, entries.length]);
 
-  if (entries.length === 0) {
-    return (
-      <div className="flex h-full items-center justify-center text-[13px] text-[var(--color-muted)]">
-        No matches
-      </div>
-    );
-  }
+  // Number of clipboard entries (the toolbar's "Clear all" only refers to
+  // those — snippets and calc rows are virtual and aren't deleted by it).
+  const clipCount = useMemo(
+    () => entries.reduce((n, e) => (e.kind === "clip" ? n + 1 : n), 0),
+    [entries],
+  );
 
   return (
-    <div ref={parentRef} className="h-full overflow-auto">
-      <div
-        style={{
-          height: virtualizer.getTotalSize(),
-          width: "100%",
-          position: "relative",
-        }}
-      >
-        {virtualizer.getVirtualItems().map((virtualRow) => {
-          const entry = entries[virtualRow.index];
-          const key = entry.kind === "snippet" ? `s-${entry.data.id}` : `c-${entry.data.id}`;
-          return (
-            <HistoryItem
-              key={key}
-              entry={entry}
-              selected={virtualRow.index === selectedIndex}
-              onClick={() => onSelect(virtualRow.index)}
-              onDoubleClick={() => onActivate(virtualRow.index)}
-              style={{
-                position: "absolute",
-                top: 0,
-                left: 0,
-                width: "100%",
-                height: virtualRow.size,
-                transform: `translateY(${virtualRow.start}px)`,
-              }}
-            />
-          );
-        })}
-      </div>
+    <div className="flex h-full flex-col">
+      {onClearAll && clipCount > 0 && (
+        <div className="flex shrink-0 items-center justify-between border-b border-[var(--color-border)] px-3 py-1 text-[11px] text-[var(--color-muted)]">
+          <span>{clipCount} clip{clipCount === 1 ? "" : "s"}</span>
+          <button
+            onClick={() => {
+              if (
+                window.confirm(
+                  `Delete all ${clipCount} clipboard ${
+                    clipCount === 1 ? "entry" : "entries"
+                  }? This cannot be undone.`,
+                )
+              ) {
+                onClearAll();
+              }
+            }}
+            className="flex items-center gap-1 rounded px-2 py-0.5 hover:bg-[var(--color-surface)] hover:text-red-400"
+            title="Delete all clipboard history"
+          >
+            <Trash2 size={11} />
+            Clear all
+          </button>
+        </div>
+      )}
+
+      {entries.length === 0 ? (
+        <div className="flex flex-1 items-center justify-center text-[13px] text-[var(--color-muted)]">
+          No matches
+        </div>
+      ) : (
+        <div ref={parentRef} className="flex-1 overflow-auto">
+          <div
+            style={{
+              height: virtualizer.getTotalSize(),
+              width: "100%",
+              position: "relative",
+            }}
+          >
+            {virtualizer.getVirtualItems().map((virtualRow) => {
+              const entry = entries[virtualRow.index];
+              const key =
+                entry.kind === "snippet"
+                  ? `s-${entry.data.id}`
+                  : entry.kind === "calc"
+                    ? `calc-${entry.data.expression}`
+                    : `c-${entry.data.id}`;
+              return (
+                <HistoryItem
+                  key={key}
+                  entry={entry}
+                  selected={virtualRow.index === selectedIndex}
+                  onClick={() => onSelect(virtualRow.index)}
+                  onDoubleClick={() => onActivate(virtualRow.index)}
+                  onSaveAsNote={
+                    onSaveAsNote ? () => onSaveAsNote(virtualRow.index) : undefined
+                  }
+                  onDelete={
+                    onDeleteClip ? () => onDeleteClip(virtualRow.index) : undefined
+                  }
+                  style={{
+                    position: "absolute",
+                    top: 0,
+                    left: 0,
+                    width: "100%",
+                    height: virtualRow.size,
+                    transform: `translateY(${virtualRow.start}px)`,
+                  }}
+                />
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

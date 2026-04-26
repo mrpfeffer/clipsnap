@@ -3,7 +3,7 @@ resolver = "2"
 members = ["core/rust-lib", "win/src-tauri", "macos/src-tauri"]
 
 [workspace.package]
-version = "0.2.4"
+version = "0.2.10"
 edition = "2021"
 authors = ["Martin Pfeffer <martinpaush@gmail.com>"]
 license = "MIT"
@@ -37,3 +37,14 @@ anyhow = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 parking_lot = "0.12"
+
+# Release profile — favours determinism over compile speed so two `cargo
+# build --release` runs of the same source produce as close to byte-identical
+# binaries as Rust currently allows. This matters for ad-hoc-signed macOS
+# builds: a stable binary → stable cdhash → the user's TCC Accessibility
+# grant survives across rebuilds. (See scripts/install-macos.sh + macos/README.md.)
+[profile.release]
+codegen-units = 1   # single codegen unit removes parallelism non-determinism
+lto = true          # full LTO; output is independent of compilation order
+strip = "debuginfo" # debug info contains paths and timestamps
+opt-level = 3

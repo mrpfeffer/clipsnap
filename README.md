@@ -5,7 +5,7 @@
 
   **Fast, lightweight clipboard history manager + text expander for Windows 11**
 
-  [![Version](https://img.shields.io/badge/version-0.2.0-blue?style=flat-square)](https://github.com/pepperonas/clipsnap/releases)
+  [![Version](https://img.shields.io/badge/version-0.2.10-blue?style=flat-square)](https://github.com/pepperonas/clipsnap/releases)
   [![License: MIT](https://img.shields.io/badge/license-MIT-green?style=flat-square)](./LICENSE)
   [![Platform](https://img.shields.io/badge/platform-Windows%2011-0078D4?style=flat-square&logo=windows11&logoColor=white)](./win)
   [![Tauri 2](https://img.shields.io/badge/Tauri-2-FFC131?style=flat-square&logo=tauri&logoColor=white)](https://tauri.app)
@@ -51,28 +51,71 @@
 
 All app logic lives in [`core/`](./core) — a single frontend (`core/frontend`) and a single Rust lib (`core/rust-lib`) shared across platforms. Each OS has its own thin bundle shell that owns platform-specific details (installer config, icons, capabilities). To add a new platform, see [`CONTRIBUTING.md`](./CONTRIBUTING.md#adding-a-new-platform-shell-linux-etc).
 
-## Features (v0.2, Windows)
+## Features
 
 ### Clipboard History
 - **Global hotkey** `Ctrl+Shift+V` opens a frameless, always-on-top popup centered on the monitor with the cursor.
 - **Clipboard capture** — text, RTF, HTML, images (≤ 5 MB, stored as base64 PNG), and file lists via real OS clipboard change events (no polling).
 - **Fuzzy search** (`fuse.js`, threshold 0.4) as you type.
 - **Virtualized list** with a preview panel per content type (text, image, HTML render, RTF, file list).
-- **Auto-paste** — Enter pastes the selected entry into the previously focused app (`enigo` simulates `Ctrl+V`).
-- **SQLite history** at `%APPDATA%\ClipSnap\history.db`, deduped on SHA-256, capped at 1 000 entries.
+- **Auto-paste** — Enter pastes the selected entry into the previously focused app (`enigo` simulates `Ctrl+V` on Windows / `Cmd+V` on macOS).
+- **SQLite history** at `%APPDATA%\ClipSnap\history.db` (Windows) / `~/Library/Application Support/ClipSnap/history.db` (macOS), deduped on SHA-256, capped at 1 000 entries.
 
-### Text Expander (new in v0.2)
+### Text Expander (snippets, v0.2)
 - **Snippets** — store reusable text templates, each with a short abbreviation (e.g. `mfg`), an optional title, and a body.
 - **Instant expansion** — type the abbreviation in the History search bar; matching snippets appear at the top of the list ranked above clipboard entries. Press Enter to paste the snippet body directly into the previously focused app.
 - **Snippets tab** — dedicated management UI accessible via the **Snippets** tab button in the top-right of the popup. Create, edit, and delete snippets with a two-column form (abbreviation · title · body).
 - **JSON import** — bulk-load snippets from a `.json` file via **Snippets → Import**, which opens the native file picker. Existing abbreviations are upserted (re-import is idempotent). Format reference in [`docs/snippets-import.md`](./docs/snippets-import.md); ready-to-import themed samples (signatures, dev boilerplates, markdown templates, …) under [`docs/examples/snippets/`](./docs/examples/snippets/).
 - **Tray shortcut** — the system tray menu includes a **Manage Snippets** item that opens the popup directly on the Snippets tab.
 
+### Inline Calculator (v0.2.5)
+Type a math expression in the search field and the result appears as the top list item — Alfred-style. Press Enter to paste the result.
+
+- **Operators:** `+ - * / % ^` (right-associative power), unary `+`/`-`, parentheses.
+- **Numbers:** integers, decimals (`0.5`, `.5`), scientific (`1e3`, `1.5e-2`), digit grouping (`1_000`).
+- **Constants:** `pi` / `π`, `tau`, `e`.
+- **Functions:** `sqrt`, `cbrt`, `abs`, `sign`, `floor`, `ceil`, `round`, `ln`, `log` (base 10), `log2`, `exp`, `sin`/`cos`/`tan` (radians), `asin`/`acos`/`atan`/`atan2`, `sinh`/`cosh`/`tanh`, `min`, `max`, `pow`, `mod`.
+- **Gating:** plain numbers (`42`) and plain text don't trigger calc mode — the input must contain at least one operator, function, or constant. Prefix with `=` to force evaluation of a single literal (`=pi`).
+- **Implementation:** safe recursive-descent parser in [`core/frontend/src/lib/calc.ts`](./core/frontend/src/lib/calc.ts) — no `eval`. 27 unit tests in [`calc.test.ts`](./core/frontend/src/lib/calc.test.ts).
+
+### Notes (v0.2.6)
+Notes are **persistent, categorized clipboard items** — they live in their own SQLite table and are **not** affected by the 1 000-entry pruning of the clipboard history.
+
+- **Bookmark a clipboard entry** — hover any History row, click the bookmark icon, the entry is copied into the `notes` table under `Uncategorized`. The note is decoupled from the clip, so even if the original gets pruned, the note stays.
+- **Notes tab** — three-pane layout: **Categories sidebar** (with note counts; virtual `All` and `Uncategorized` groups), **note list**, **detail/edit pane**.
+- **Free-form categories** — typing a new category name into the edit form auto-creates it; the input has a `<datalist>` autocomplete from existing categories.
+- **Editable bodies** for `text`, `html`, `rtf`. `image` and `files` notes are read-only (you can still rename them and change category). Image notes paste back as images, HTML as HTML, etc. — content type is preserved.
+- **From-scratch text notes** via **+ New Note** (no clipboard source needed).
+- **Clear All** with confirmation; per-row delete via hover-trash.
+- **Tray shortcut** — **Manage Notes** opens the popup directly on the Notes tab.
+- Full reference: [`docs/notes.md`](./docs/notes.md).
+
+### Backup — full app export / import (v0.2.6)
+The Notes tab toolbar includes **Export…** and **Import…** for a single-file JSON backup of the whole app.
+
+- **Export** writes a pretty-printed JSON file containing `{ version, exported_at, history, snippets, notes }` to a path of your choice (native save dialog).
+- **Import** merges that file back into the live database with sensible per-table semantics:
+  - Snippets — **upsert by `abbreviation`** (existing rows overwritten).
+  - History — **upsert by SHA-256 hash** (duplicates bump `last_used_at`; the 1 000-entry cap still applies).
+  - Notes — **appended verbatim** with original timestamps preserved.
+- **Versioned schema** — backups carry a `version` field; ClipSnap refuses to import a backup whose version is newer than the running build, instead of silently dropping fields.
+- Full reference: [`docs/backup.md`](./docs/backup.md).
+
+### System-wide text expander (v0.2.7)
+Type a snippet abbreviation in **any** text field, press your configured hotkey, and ClipSnap replaces it in place with the snippet body — like aText / TextExpander, but **trigger-based** (no keylogger).
+
+- **Default hotkey:** `Alt + Backquote` (= `Alt + ^` on a German keyboard, `Alt + \`` on US). Disabled by default — opt in from the **Settings** tab.
+- **Hotkey is configurable** via a click-to-record field in the Settings panel. Bad combinations are rejected without losing your previous registration.
+- **How it works:** ClipSnap synthesizes the OS shortcut for *select previous word* (`Option+Shift+←` macOS / `Ctrl+Shift+←` elsewhere) → copy → look up snippet → paste body over the selection. The user's clipboard is saved before and restored after the cycle.
+- **Cross-platform:** macOS / Windows / Linux X11. Wayland depends on the compositor's global-shortcut portal.
+- **Caveats:** terminals (iTerm2, kitty, gnome-terminal) sometimes interpret the word-select shortcut differently; password fields refuse synthetic paste; image/files snippets are not expanded (text only).
+- Full reference: [`docs/text-expander.md`](./docs/text-expander.md).
+
 ### Multi-monitor placement
 The popup opens on the monitor that contains the mouse cursor at hotkey time, horizontally centered and ~⅓ from the top. Placement is **clamped** to the active monitor's bounds, so the window never extends past a screen edge — important for mixed-DPI setups (e.g., MacBook Retina + external display). Implementation in [`core/rust-lib/src/hotkey.rs`](./core/rust-lib/src/hotkey.rs).
 
 ### System Tray
-Menu items: Open · Manage Snippets · Pause Capture · Clear History · Start with Windows / Start at Login · Quit.
+Menu items: Open · Manage Snippets · Manage Notes · Pause Capture · Clear History · Start with Windows / Start at Login · Quit.
 
 ## Repository layout
 
@@ -80,7 +123,23 @@ Menu items: Open · Manage Snippets · Pause Capture · Clear History · Start w
 clipsnap/
 ├── core/
 │   ├── frontend/            # React 19 + TS + Tailwind v4 (cross-platform)
-│   └── rust-lib/            # Shared Rust app logic (clipboard, db, hotkey, paste, tray, snippets)
+│   │   └── src/
+│   │       ├── components/  # SearchBar, HistoryList/Item, PreviewPanel, SnippetsPanel, NotesPanel, …
+│   │       ├── hooks/       # useClipboardHistory, useFuzzySearch, useSnippets, useNotes, useKeyboardNav
+│   │       └── lib/         # ipc.ts, types.ts, calc.ts (Alfred-style evaluator), format.ts
+│   └── rust-lib/            # Shared Rust app logic
+│       └── src/
+│           ├── lib.rs       # Tauri builder, plugin/tray setup, invoke_handler
+│           ├── db.rs        # entries table, hash-dedup, prune
+│           ├── snippets.rs  # snippets table, JSON upsert, exact-abbreviation lookup
+│           ├── notes.rs     # notes table, categories, save_from_clip
+│           ├── backup.rs    # full-app export/import (versioned JSON)
+│           ├── settings.rs  # key/value store (expander hotkey + future prefs)
+│           ├── expander.rs  # trigger-based text expander (clipboard roundtrip)
+│           ├── paste.rs     # write_to_clipboard + enigo paste shortcut
+│           ├── hotkey.rs    # global Ctrl+Shift+V + expander hotkey, multi-monitor placement
+│           ├── clipboard_watcher.rs  # event-driven capture, RTF stripping
+│           └── commands.rs  # all #[tauri::command] wrappers
 ├── win/                     # Windows-specific bundle shell
 │   ├── README.md            # Windows install & build details
 │   ├── package.json         # Tauri CLI entry
@@ -96,6 +155,9 @@ clipsnap/
 ├── docs/
 │   ├── spec.md              # Original product specification
 │   ├── snippets-import.md   # JSON snippet import — schema, semantics, examples
+│   ├── notes.md             # Notes feature — categories, edit semantics, IPC surface
+│   ├── backup.md            # Full-app export/import — schema, merge semantics, jq recipes
+│   ├── text-expander.md     # System-wide expander — workflow, hotkey format, per-OS caveats
 │   ├── RELEASING.md         # Release procedure
 │   └── examples/
 │       └── snippets/        # 5 themed JSON examples + their own README
@@ -130,9 +192,13 @@ pnpm dev:win          # tauri dev — live-reload
 pnpm build:win        # → target/release/bundle/msi/ClipSnap_x.x.x_x64_en-US.msi
 
 # macOS
-pnpm dev:macos        # tauri dev — live-reload
-pnpm build:macos      # → target/release/bundle/{macos/ClipSnap.app, dmg/ClipSnap_x.x.x_<arch>.dmg}
+pnpm dev:macos                      # tauri dev — live-reload
+pnpm build:macos                    # → target/release/bundle/{macos/ClipSnap.app, dmg/ClipSnap_x.x.x_<arch>.dmg}
+bash scripts/install-macos.sh       # build + re-sign + install into /Applications + launch
+bash scripts/install-macos.sh --reset  # …also tccutil-reset stale Accessibility grants (use after first run)
 ```
+
+> Why the `install-macos.sh` helper? Without an Apple Developer ID, every fresh `pnpm build:macos` gets a new random signing identifier, which makes macOS TCC treat each rebuild as a new app and prompt for Accessibility again. The script forces a stable ad-hoc identifier (`io.celox.clipsnap`) so the grant survives across rebuilds. Full background: [`macos/README.md` — Accessibility permission](./macos/README.md#why-the-dialog-re-appears-after-every-rebuild-and-how-to-stop-that).
 
 > Each platform must be built on its native host (Windows for MSI, macOS for DMG/`.app`). Cross-compilation is not supported.
 
@@ -152,11 +218,21 @@ In ClipSnap: open the popup (`Ctrl+Shift+V`) → **Snippets** tab → **Import**
 
 See [`docs/snippets-import.md`](./docs/snippets-import.md) for the full schema, field semantics, the sqlite3+jq export recipe, and tips/anti-patterns.
 
+### Notes & Backup
+
+Notes get their own tab; the toolbar at the bottom of the categories sidebar has **+ New Note**, **Export…**, **Import…**, **Clear All**.
+
+- **Save a clipboard entry as a note:** hover any History row → click the bookmark icon → the entry lands in the `Uncategorized` bucket of the Notes tab. Move it to a category by editing the note.
+- **Export full backup:** Notes tab → **Export…** → choose a path. ClipSnap writes a single JSON file with `history + snippets + notes` (default name `clipsnap-backup-<timestamp>.json`).
+- **Import a backup:** Notes tab → **Import…** → pick the JSON file. Snippets and history merge by their natural keys (abbreviation / SHA-256 hash); notes are appended.
+
+Full feature reference: [`docs/notes.md`](./docs/notes.md). Backup file schema and merge semantics: [`docs/backup.md`](./docs/backup.md).
+
 ### Tests
 
 ```bash
-pnpm test             # frontend unit tests (vitest + happy-dom) — 24 tests
-cargo test --workspace  # Rust unit tests — 33 tests (db, snippets/import)
+pnpm test               # frontend unit tests (vitest + happy-dom) — 53 tests
+cargo test --workspace  # Rust unit tests — 71 tests (db, snippets, notes, backup, settings, expander, hotkey parser, clipboard_watcher, models)
 ```
 
 The same commands run in [GitHub Actions CI](./.github/workflows/ci.yml) on every push and PR.
@@ -173,7 +249,7 @@ pnpm check            # cargo clippy (workspace) + tsc --noEmit + eslint
 |------------|--------|
 | **Unencrypted storage** | The SQLite history file is unencrypted — passwords and tokens you copy are visible to anyone with filesystem access to your profile. |
 | **No sensitive-app detection** | ClipSnap captures everything without filtering. |
-| **No cloud sync** | No sync, multi-device support, tagging, or favorites — explicitly out of scope for v1. |
+| **No cloud sync** | No automatic sync or multi-device support — but the [Backup](./docs/backup.md) export/import gives you a portable JSON file you can move between machines manually. |
 | **File paste fallback** | Setting file-list clipboard payloads from Rust is not universally supported; ClipSnap falls back to pasting the newline-joined list of paths as text. |
 | **macOS accessibility** | Paste simulation (`enigo`) requires Accessibility access. macOS will prompt on first use — grant it in System Preferences → Privacy & Security → Accessibility. |
 | **macOS unsigned build** | Release builds are not notarized. macOS may warn "unidentified developer" — right-click the app and choose Open to bypass Gatekeeper on first launch. |

@@ -33,4 +33,14 @@ describe("Footer", () => {
     expect(screen.getByText("↑↓")).toBeTruthy();
     expect(screen.getByText("Esc")).toBeTruthy();
   });
+
+  it("renders the version chip when version is provided", () => {
+    render(<Footer index={0} total={1} version="0.2.6" />);
+    expect(screen.getByText("v0.2.6")).toBeTruthy();
+  });
+
+  it("omits the version chip when version is undefined", () => {
+    render(<Footer index={0} total={1} />);
+    expect(screen.queryByText(/^v\d/)).toBeNull();
+  });
 });

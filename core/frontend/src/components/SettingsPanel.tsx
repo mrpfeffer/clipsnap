@@ -1,0 +1,508 @@
+import { useEffect, useRef, useState } from "react";
+import { AlertTriangle, CheckCircle2, Keyboard, PlayCircle, Wand2, Zap } from "lucide-react";
+import {
+  diagnoseExpandAtCursor,
+  getAccessibilityStatus,
+  getExpanderConfig,
+  openAccessibilitySettings,
+  quitApp,
+  relaunchApp,
+  requestAccessibilityGrant,
+  setExpanderConfig,
+  type DiagnoseResult,
+  type ExpanderConfig,
+} from "../lib/ipc";
+import { HotkeyCapture } from "./HotkeyCapture";
+
+const DEFAULT_HOTKEY = "Alt+Backquote";
+
+export function SettingsPanel() {
+  const [cfg, setCfg] = useState<ExpanderConfig | null>(null);
+  const [hotkey, setHotkey] = useState<string>(DEFAULT_HOTKEY);
+  const [enabled, setEnabled] = useState(false);
+  const [accessibility, setAccessibility] = useState<boolean | null>(null);
+  // Set to true when polling detects a false→true transition. Drives the
+  // "Access detected — restart ClipSnap to activate?" prompt: macOS caches
+  // AXIsProcessTrusted per-process, so the running ClipSnap can't actually
+  // *use* the just-granted permission until it's relaunched.
+  const [justGranted, setJustGranted] = useState(false);
+  const [restarting, setRestarting] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [diagnose, setDiagnose] = useState<
+    | { kind: "running" }
+    | { kind: "result"; data: DiagnoseResult }
+    | { kind: "err"; message: string }
+    | null
+  >(null);
+  const [status, setStatus] = useState<
+    | { kind: "ok"; message: string }
+    | { kind: "err"; message: string }
+    | null
+  >(null);
+  const pollRef = useRef<number | null>(null);
+
+  // Initial load.
+  useEffect(() => {
+    let alive = true;
+    getExpanderConfig()
+      .then((c) => {
+        if (!alive) return;
+        setCfg(c);
+        setHotkey(c.hotkey);
+        setEnabled(c.enabled);
+        setAccessibility(c.accessibility_granted);
+      })
+      .catch((e) => setStatus({ kind: "err", message: String(e) }));
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  // While Accessibility is *not* granted, poll once a second so the badge
+  // flips to green within a moment of the user toggling it on in System
+  // Settings — instead of needing a panel reload. Crucially: when the
+  // status flips false→true, surface a one-time restart prompt because
+  // the running process can't actually *use* the new grant until it's
+  // re-launched (macOS caches AXIsProcessTrusted per-process).
+  useEffect(() => {
+    if (accessibility === null || accessibility === true) return;
+    const id = window.setInterval(async () => {
+      try {
+        const ok = await getAccessibilityStatus();
+        if (ok) {
+          setAccessibility(true);
+          setJustGranted(true);
+        }
+      } catch {
+        /* ignore — keep polling */
+      }
+    }, 1000);
+    pollRef.current = id;
+    return () => {
+      if (pollRef.current !== null) window.clearInterval(pollRef.current);
+      pollRef.current = null;
+    };
+  }, [accessibility]);
+
+  const dirty =
+    cfg !== null && (cfg.enabled !== enabled || cfg.hotkey !== hotkey);
+
+  const save = async () => {
+    setBusy(true);
+    setStatus(null);
+    try {
+      const applied = await setExpanderConfig(enabled, hotkey || DEFAULT_HOTKEY);
+      setCfg(applied);
+      setHotkey(applied.hotkey);
+      setEnabled(applied.enabled);
+      setStatus({
+        kind: "ok",
+        message: applied.enabled
+          ? `Expander armed: ${applied.hotkey}`
+          : "Expander disabled.",
+      });
+    } catch (e) {
+      setStatus({ kind: "err", message: String(e) });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const reset = () => {
+    setHotkey(DEFAULT_HOTKEY);
+    setStatus(null);
+  };
+
+  return (
+    <div className="relative flex min-h-0 flex-1 flex-col overflow-auto p-6">
+      {/* Accessibility banner — sits *above* the section card, sticky so
+          users always see action buttons when access is missing. Background
+          is solid (var(--color-bg)) so scrolling content can't bleed
+          through. */}
+      {accessibility === false && (
+        <div className="sticky top-[-24px] z-20 mx-auto -mt-2 mb-4 w-full max-w-2xl">
+          <div className="flex flex-col gap-3 rounded border border-amber-500/60 bg-[var(--color-bg)] px-3 py-2.5 text-[12px] text-[var(--color-text)] shadow-md ring-1 ring-amber-500/30">
+            <div className="flex items-start gap-2">
+              <AlertTriangle size={14} className="mt-0.5 shrink-0 text-amber-500" />
+              <div className="flex-1">
+                <div className="font-medium">
+                  Accessibility access required (macOS)
+                </div>
+                <div className="mt-0.5 text-[var(--color-muted)]">
+                  ClipSnap can't synthesize Cmd+Shift+← / Cmd+C / Cmd+V
+                  without it. This panel auto-detects when you flip the
+                  toggle in System Settings.
+                </div>
+                <ol className="mt-2 list-decimal space-y-0.5 pl-4 text-[11px] text-[var(--color-muted)]">
+                  <li>Click <b>Open System Settings</b> below.</li>
+                  <li>Enable the <b>ClipSnap</b> toggle. (If it isn't in the list yet, click <b>+</b> and pick <code className="rounded bg-[var(--color-surface)] px-1">/Applications/ClipSnap.app</code>.)</li>
+                  <li>Switch back to ClipSnap. Within a second, this banner flips to a green <b>Restart now</b> prompt — one click, and you're done.</li>
+                </ol>
+                <details className="mt-2 text-[11px] text-[var(--color-muted)]">
+                  <summary className="cursor-pointer">Why does this keep happening on rebuild?</summary>
+                  <p className="mt-1">
+                    macOS Tahoe binds the Accessibility grant to the app's
+                    code-signature hash (<code>cdhash</code>). ClipSnap is
+                    ad-hoc-signed (no Apple Developer ID), so any binary
+                    change produces a new <code>cdhash</code> and macOS
+                    treats it as a new app. The{" "}
+                    <code>scripts/install-macos.sh</code> helper detects
+                    "binary unchanged" via SHA-256 and skips re-signing in
+                    that case, so a no-op rebuild keeps your grant. Real
+                    source changes still require a re-grant — the only
+                    permanent fix is an Apple Developer ID.
+                  </p>
+                </details>
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-2 pl-6">
+              <button
+                onClick={async () => {
+                  try {
+                    await openAccessibilitySettings();
+                  } catch (e) {
+                    setStatus({ kind: "err", message: String(e) });
+                  }
+                }}
+                className="rounded bg-[var(--color-accent)] px-2.5 py-1 text-[11px] text-[var(--color-accent-fg)] hover:opacity-90"
+              >
+                Open System Settings
+              </button>
+              <button
+                onClick={async () => {
+                  try {
+                    if (!window.confirm("Quit ClipSnap now? Re-launch it via Spotlight / Dock to pick up the new Accessibility grant.")) return;
+                    await quitApp();
+                  } catch (e) {
+                    setStatus({ kind: "err", message: String(e) });
+                  }
+                }}
+                className="rounded border border-amber-500/60 bg-amber-500/10 px-2.5 py-1 text-[11px] text-amber-600 hover:bg-amber-500/20 dark:text-amber-400"
+              >
+                Quit ClipSnap
+              </button>
+              <button
+                onClick={async () => {
+                  try {
+                    await requestAccessibilityGrant();
+                  } catch (e) {
+                    setStatus({ kind: "err", message: String(e) });
+                  }
+                }}
+                className="rounded border border-[var(--color-border)] px-2.5 py-1 text-[11px] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
+                title="Triggers macOS' built-in Accessibility prompt. May not show if macOS rate-limited it; in that case use the System Settings button."
+              >
+                Try system prompt
+              </button>
+              <button
+                onClick={async () => {
+                  try {
+                    const ok = await getAccessibilityStatus();
+                    setAccessibility(ok);
+                  } catch (e) {
+                    setStatus({ kind: "err", message: String(e) });
+                  }
+                }}
+                className="rounded border border-[var(--color-border)] px-2.5 py-1 text-[11px] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
+              >
+                Re-check
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="mx-auto w-full max-w-2xl">
+        {/* Text expander section */}
+        <Section
+          icon={<Wand2 size={16} className="text-[var(--color-accent)]" />}
+          title="Text expander"
+          subtitle="Type a snippet abbreviation in any text field, then press your hotkey to replace it with the snippet body. Like aText / TextExpander."
+        >
+          {/* Granted state — shown inline since it's not actionable.
+              Special case: if we *just* detected the false→true edge
+              while polling, prompt for a restart, because the running
+              process can't see the new grant until macOS re-evaluates
+              AXIsProcessTrusted on a fresh launch. */}
+          {accessibility === true && justGranted && (
+            <div className="mb-4 flex flex-col gap-2 rounded border border-emerald-500/40 bg-emerald-500/5 px-3 py-2.5 text-[12px]">
+              <div className="flex items-start gap-2">
+                <CheckCircle2 size={14} className="mt-0.5 shrink-0 text-emerald-500" />
+                <div className="flex-1">
+                  <div className="font-medium">Access detected — one more step</div>
+                  <div className="mt-0.5 text-[var(--color-muted)]">
+                    macOS caches the trust check per-process, so the
+                    running ClipSnap can't actually use the just-granted
+                    permission until it relaunches. The new instance will
+                    take ~1 second to start.
+                  </div>
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2 pl-6">
+                <button
+                  onClick={async () => {
+                    setRestarting(true);
+                    try {
+                      await relaunchApp();
+                      // We won't reach this point — process is exiting.
+                    } catch (e) {
+                      setRestarting(false);
+                      setStatus({ kind: "err", message: String(e) });
+                    }
+                  }}
+                  disabled={restarting}
+                  className="rounded bg-emerald-500 px-2.5 py-1 text-[11px] font-medium text-white hover:opacity-90 disabled:opacity-50"
+                >
+                  {restarting ? "Restarting…" : "Restart now"}
+                </button>
+                <button
+                  onClick={() => setJustGranted(false)}
+                  className="rounded border border-[var(--color-border)] px-2.5 py-1 text-[11px] text-[var(--color-muted)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
+                  title="Dismiss this prompt — the expander will work next time you launch ClipSnap"
+                >
+                  Later
+                </button>
+              </div>
+            </div>
+          )}
+          {accessibility === true && !justGranted && (
+            <div className="mb-4 flex items-center gap-2 rounded border border-emerald-500/30 bg-emerald-500/5 px-3 py-2 text-[12px]">
+              <CheckCircle2 size={14} className="shrink-0 text-emerald-500" />
+              <span className="font-medium">Accessibility access granted</span>
+            </div>
+          )}
+
+          <Row label="Enable">
+            <label className="flex cursor-pointer items-center gap-2 text-[12px]">
+              <input
+                type="checkbox"
+                checked={enabled}
+                onChange={(e) => setEnabled(e.target.checked)}
+                className="accent-[var(--color-accent)]"
+              />
+              <span className="text-[var(--color-muted)]">
+                {enabled ? "Hotkey is registered globally" : "Hotkey is unregistered"}
+              </span>
+            </label>
+          </Row>
+
+          <Row
+            label="Hotkey"
+            help="Click the button and press a key combination. Backspace clears, Esc cancels. Names match the W3C KeyboardEvent.code spec (Backquote, KeyE, Digit1, …)."
+          >
+            <div className="flex items-center gap-2">
+              <HotkeyCapture
+                value={hotkey}
+                onChange={setHotkey}
+                disabled={busy}
+              />
+              <button
+                onClick={reset}
+                disabled={busy || hotkey === DEFAULT_HOTKEY}
+                className="rounded border border-[var(--color-border)] px-2 py-1 text-[11px] text-[var(--color-muted)] hover:border-[var(--color-accent)] hover:text-[var(--color-fg)] disabled:opacity-40"
+                title="Reset to Alt+Backquote"
+              >
+                Reset
+              </button>
+            </div>
+          </Row>
+
+          <div className="mt-4 flex items-center gap-3">
+            <button
+              onClick={() => void save()}
+              disabled={!dirty || busy || !hotkey}
+              className="rounded bg-[var(--color-accent)] px-3 py-1 text-[12px] text-[var(--color-accent-fg)] hover:opacity-90 disabled:opacity-50"
+            >
+              {busy ? "Saving…" : dirty ? "Save & re-register" : "No changes"}
+            </button>
+            {status && (
+              <span
+                className={
+                  "text-[11px] " +
+                  (status.kind === "ok"
+                    ? "text-[var(--color-muted)]"
+                    : "text-red-400")
+                }
+              >
+                {status.message}
+              </span>
+            )}
+          </div>
+
+          <div className="mt-3 flex flex-col gap-2 rounded border border-dashed border-[var(--color-border)] p-3">
+            <div className="flex items-start gap-3">
+              <PlayCircle size={14} className="mt-0.5 shrink-0 text-[var(--color-accent)]" />
+              <div className="flex-1 text-[11px] text-[var(--color-muted)]">
+                <div className="text-[var(--color-fg)]">Diagnose expansion (no paste)</div>
+                <p className="mt-0.5">
+                  Type a snippet abbreviation in any text field, place the
+                  cursor right after it, then click <b>Diagnose</b>. ClipSnap
+                  will hide its popup, capture the word before your cursor,
+                  look it up — and report what it found, without pasting.
+                  This isolates the lookup from the paste step so you can
+                  see exactly where expansion is breaking.
+                </p>
+              </div>
+              <button
+                onClick={async () => {
+                  setDiagnose({ kind: "running" });
+                  try {
+                    const data = await diagnoseExpandAtCursor();
+                    setDiagnose({ kind: "result", data });
+                  } catch (e) {
+                    setDiagnose({ kind: "err", message: String(e) });
+                  }
+                }}
+                disabled={diagnose?.kind === "running"}
+                className="rounded border border-[var(--color-border)] px-3 py-1 text-[11px] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)] disabled:opacity-50"
+              >
+                {diagnose?.kind === "running" ? "Capturing…" : "Diagnose"}
+              </button>
+            </div>
+
+            {diagnose?.kind === "result" && (
+              <div className="rounded border border-[var(--color-border)] bg-[var(--color-surface)] p-2 text-[11px]">
+                <div className="grid grid-cols-[110px_1fr] gap-x-3 gap-y-1">
+                  <span className="text-[var(--color-muted)]">Captured</span>
+                  <code className="rounded bg-[var(--color-bg)] px-1 font-[var(--font-mono)]">
+                    {diagnose.data.captured || "(empty)"}
+                  </code>
+                  <span className="text-[var(--color-muted)]">Snippet match</span>
+                  <span>
+                    {diagnose.data.matched_abbreviation ? (
+                      <code className="rounded bg-[var(--color-bg)] px-1 font-[var(--font-mono)] text-emerald-400">
+                        {diagnose.data.matched_abbreviation}
+                      </code>
+                    ) : (
+                      <span className="text-amber-400">
+                        no match — add a snippet with this abbreviation
+                      </span>
+                    )}
+                  </span>
+                  {diagnose.data.paste_preview && (
+                    <>
+                      <span className="text-[var(--color-muted)]">Would paste</span>
+                      <code className="block truncate rounded bg-[var(--color-bg)] px-1 font-[var(--font-mono)]">
+                        {diagnose.data.paste_preview}
+                      </code>
+                    </>
+                  )}
+                </div>
+                {!diagnose.data.captured && (
+                  <p className="mt-2 text-[var(--color-muted)]">
+                    Empty capture usually means the popup didn't lose focus
+                    fast enough, or there was no text before your cursor.
+                    Try again with the cursor placed right after a typed
+                    abbreviation.
+                  </p>
+                )}
+                {diagnose.data.captured && !diagnose.data.matched_abbreviation && (
+                  <p className="mt-2 text-[var(--color-muted)]">
+                    The capture worked, but no snippet has{" "}
+                    <code className="rounded bg-[var(--color-bg)] px-1">
+                      {diagnose.data.captured}
+                    </code>{" "}
+                    as its abbreviation. Open the <b>Snippets</b> tab and
+                    create one, or pick a different abbreviation.
+                  </p>
+                )}
+              </div>
+            )}
+            {diagnose?.kind === "err" && (
+              <div className="text-[11px] text-red-400">{diagnose.message}</div>
+            )}
+          </div>
+
+          <details className="mt-5 rounded border border-[var(--color-border)] bg-[var(--color-surface)] p-3 text-[11px] text-[var(--color-muted)]">
+            <summary className="cursor-pointer font-medium">How it works</summary>
+            <ul className="mt-2 list-disc space-y-1 pl-5">
+              <li>
+                When you press the hotkey, ClipSnap synthesizes{" "}
+                <kbd className="rounded border border-[var(--color-border)] px-1">
+                  Cmd/Ctrl+Shift+←
+                </kbd>{" "}
+                to select the previous word, copies it, and looks it up in
+                your snippets.
+              </li>
+              <li>
+                On a hit, the snippet body is written to the clipboard and{" "}
+                <kbd className="rounded border border-[var(--color-border)] px-1">
+                  Cmd/Ctrl+V
+                </kbd>{" "}
+                pastes over the still-selected abbreviation.
+              </li>
+              <li>
+                On a miss, the selection stays visible (visual cue) and your
+                clipboard is left untouched.
+              </li>
+              <li>
+                Caveats: terminals (iTerm2, kitty, gnome-terminal) sometimes
+                interpret the word-select shortcut differently — the
+                abbreviation may not be picked up cleanly there. Password
+                fields refuse synthetic paste in many apps.
+              </li>
+            </ul>
+          </details>
+        </Section>
+      </div>
+    </div>
+  );
+}
+
+function Section({
+  icon,
+  title,
+  subtitle,
+  children,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  subtitle?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div>
+      <div className="mb-1 flex items-center gap-2">
+        {icon}
+        <h2 className="text-[14px] font-semibold">{title}</h2>
+      </div>
+      {subtitle && (
+        <p className="mb-4 text-[12px] text-[var(--color-muted)]">
+          {subtitle}
+        </p>
+      )}
+      <div className="rounded-lg border border-[var(--color-border)] p-4">
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function Row({
+  label,
+  help,
+  children,
+}: {
+  label: string;
+  help?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="mb-4 last:mb-0">
+      <div className="mb-1 flex items-center gap-2 text-[12px] font-medium">
+        <Zap size={11} className="text-[var(--color-accent)] opacity-70" />
+        <span>{label}</span>
+      </div>
+      <div>{children}</div>
+      {help && (
+        <p className="mt-1 text-[11px] leading-snug text-[var(--color-muted)]">
+          {help}
+        </p>
+      )}
+    </div>
+  );
+}
+
+// Re-export so `import { Keyboard } from ...` keeps the icon utility nearby
+// when we add more settings sections.
+export { Keyboard };

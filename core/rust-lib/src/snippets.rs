@@ -1,6 +1,6 @@
 use anyhow::{anyhow, Result};
 use chrono::Utc;
-use rusqlite::params;
+use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
 use crate::db::DbHandle;
@@ -51,6 +51,40 @@ pub fn list_all(db: &DbHandle) -> Result<Vec<Snippet>> {
     )?;
     let rows = stmt.query_map([], row_to_snippet)?;
     rows.collect::<rusqlite::Result<Vec<_>>>().map_err(Into::into)
+}
+
+/// Look up a single snippet by its abbreviation. Returns the case-sensitive
+/// match if one exists; otherwise falls back to a case-insensitive match
+/// (so the text expander matches `MFG` to a snippet stored as `mfg` if no
+/// `MFG` exists). Empty / whitespace input returns `None`.
+pub fn find_by_exact_abbreviation(db: &DbHandle, abbr: &str) -> Result<Option<Snippet>> {
+    let trimmed = abbr.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+
+    let conn = db.lock();
+    let exact: Option<Snippet> = conn
+        .query_row(
+            "SELECT id, abbreviation, title, body, created_at, updated_at \
+             FROM snippets WHERE abbreviation = ?1 LIMIT 1",
+            params![trimmed],
+            row_to_snippet,
+        )
+        .optional()?;
+    if let Some(s) = exact {
+        return Ok(Some(s));
+    }
+
+    let ci: Option<Snippet> = conn
+        .query_row(
+            "SELECT id, abbreviation, title, body, created_at, updated_at \
+             FROM snippets WHERE LOWER(abbreviation) = LOWER(?1) LIMIT 1",
+            params![trimmed],
+            row_to_snippet,
+        )
+        .optional()?;
+    Ok(ci)
 }
 
 /// Match abbreviation prefix first, then body/title contains — up to 10 results.
@@ -298,5 +332,49 @@ mod tests {
         import_from_json(&db, json).unwrap();
         let rows = list_all(&db).unwrap();
         assert_eq!(rows[0].abbreviation, "spaced");
+    }
+
+    #[test]
+    fn find_by_exact_abbreviation_case_sensitive_first() {
+        let db = test_db();
+        create(&db, "MFG", "shouty", "uppercase body").unwrap();
+        create(&db, "mfg", "lower", "lowercase body").unwrap();
+        // Exact case wins over the case-insensitive fallback.
+        let hit = find_by_exact_abbreviation(&db, "MFG").unwrap().unwrap();
+        assert_eq!(hit.body, "uppercase body");
+        let hit = find_by_exact_abbreviation(&db, "mfg").unwrap().unwrap();
+        assert_eq!(hit.body, "lowercase body");
+    }
+
+    #[test]
+    fn find_by_exact_abbreviation_falls_back_to_ci() {
+        let db = test_db();
+        create(&db, "mfg", "lower", "lowercase body").unwrap();
+        // No "MFG" row exists — falls back to "mfg".
+        let hit = find_by_exact_abbreviation(&db, "MFG").unwrap().unwrap();
+        assert_eq!(hit.body, "lowercase body");
+    }
+
+    #[test]
+    fn find_by_exact_abbreviation_returns_none_for_empty_input() {
+        let db = test_db();
+        create(&db, "mfg", "", "x").unwrap();
+        assert!(find_by_exact_abbreviation(&db, "").unwrap().is_none());
+        assert!(find_by_exact_abbreviation(&db, "   ").unwrap().is_none());
+    }
+
+    #[test]
+    fn find_by_exact_abbreviation_trims_whitespace_before_lookup() {
+        let db = test_db();
+        create(&db, "mfg", "", "x").unwrap();
+        let hit = find_by_exact_abbreviation(&db, "  mfg \n").unwrap().unwrap();
+        assert_eq!(hit.abbreviation, "mfg");
+    }
+
+    #[test]
+    fn find_by_exact_abbreviation_returns_none_for_unknown_abbr() {
+        let db = test_db();
+        create(&db, "mfg", "", "x").unwrap();
+        assert!(find_by_exact_abbreviation(&db, "nope").unwrap().is_none());
     }
 }

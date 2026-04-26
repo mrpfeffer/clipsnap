@@ -1,10 +1,70 @@
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
+use parking_lot::Mutex;
+use std::str::FromStr;
+use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, Monitor, PhysicalPosition, WebviewWindow};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
+use crate::db::DbHandle;
+use crate::expander;
+
+/// Parse a `Modifier+...+Code` shortcut string. We deliberately avoid
+/// `Shortcut::from_str` from the Tauri plugin — its lookup table is
+/// incomplete (no `IntlBackslash`, `IntlBackquote`, `IntlRo`, `IntlYen`,
+/// no media keys beyond a handful, …). `keyboard_types::Code` (which the
+/// plugin re-exports as `Code`) implements `FromStr` for the full W3C
+/// `KeyboardEvent.code` spec, so we route everything through it.
+pub fn parse_shortcut(s: &str) -> Result<Shortcut> {
+    let trimmed = s.trim();
+    if trimmed.is_empty() {
+        return Err(anyhow!("empty shortcut string"));
+    }
+
+    let tokens: Vec<&str> = trimmed.split('+').map(str::trim).collect();
+    if tokens.iter().any(|t| t.is_empty()) {
+        return Err(anyhow!("empty token in shortcut: {trimmed:?}"));
+    }
+
+    let (code_token, mod_tokens) = tokens
+        .split_last()
+        .ok_or_else(|| anyhow!("missing key code in shortcut: {trimmed:?}"))?;
+
+    let mut mods = Modifiers::empty();
+    for raw in mod_tokens {
+        match raw.to_ascii_uppercase().as_str() {
+            "CTRL" | "CONTROL" => mods |= Modifiers::CONTROL,
+            "SHIFT" => mods |= Modifiers::SHIFT,
+            "ALT" | "OPTION" | "OPT" => mods |= Modifiers::ALT,
+            "META" | "CMD" | "COMMAND" | "SUPER" | "WIN" => mods |= Modifiers::SUPER,
+            #[cfg(target_os = "macos")]
+            "CMDORCTRL" | "CMDORCONTROL" | "COMMANDORCONTROL" | "COMMANDORCTRL" => {
+                mods |= Modifiers::SUPER
+            }
+            #[cfg(not(target_os = "macos"))]
+            "CMDORCTRL" | "CMDORCONTROL" | "COMMANDORCONTROL" | "COMMANDORCTRL" => {
+                mods |= Modifiers::CONTROL
+            }
+            other => return Err(anyhow!("unknown modifier {other:?} in {trimmed:?}")),
+        }
+    }
+
+    let code = Code::from_str(code_token)
+        .map_err(|_| anyhow!("unknown key code {code_token:?} in {trimmed:?}"))?;
+
+    Ok(Shortcut::new(Some(mods), code))
+}
+
 pub const POPUP_LABEL: &str = "popup";
 
-/// Ctrl+Shift+V global hotkey.
+/// Holds the currently-registered expander shortcut (if any), so we can
+/// unregister it cleanly when the user changes it from the settings panel.
+/// Tauri state.
+#[derive(Default)]
+pub struct ExpanderShortcutState {
+    pub current: Arc<Mutex<Option<Shortcut>>>,
+}
+
+/// Ctrl+Shift+V global hotkey for the popup.
 pub fn register(app: &AppHandle) -> Result<()> {
     let shortcut = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyV);
     let app_for_handler = app.clone();
@@ -19,6 +79,134 @@ pub fn register(app: &AppHandle) -> Result<()> {
         })
         .context("failed to register Ctrl+Shift+V")?;
     Ok(())
+}
+
+/// Register the text-expander hotkey from a string like `"Alt+Backquote"`.
+/// If a previous expander shortcut was registered, it is unregistered
+/// first. A no-op if `enabled` is false (any prior registration is
+/// removed).
+pub fn register_expander(
+    app: &AppHandle,
+    state: &ExpanderShortcutState,
+    hotkey: &str,
+    enabled: bool,
+) -> Result<()> {
+    // Always unregister whatever was previously registered first.
+    {
+        let mut current = state.current.lock();
+        if let Some(prev) = current.take() {
+            let _ = app.global_shortcut().unregister(prev);
+        }
+    }
+
+    if !enabled {
+        tracing::info!("text expander disabled");
+        return Ok(());
+    }
+
+    let shortcut = parse_shortcut(hotkey)
+        .with_context(|| format!("could not parse expander hotkey {hotkey:?}"))?;
+
+    let app_for_handler = app.clone();
+    app.global_shortcut()
+        .on_shortcut(shortcut, move |_app, sc, event| {
+            if event.state == ShortcutState::Pressed && *sc == shortcut {
+                let app = app_for_handler.clone();
+                // Run on a worker thread — synthesizing keystrokes from
+                // inside the global-shortcut callback can deadlock on some
+                // platforms.
+                std::thread::spawn(move || {
+                    if let Some(db) = app.try_state::<DbHandle>() {
+                        if let Err(e) = expander::expand_at_cursor(&db) {
+                            tracing::warn!("expand_at_cursor failed: {e:#}");
+                        }
+                    }
+                });
+            }
+        })
+        .with_context(|| format!("failed to register expander hotkey {hotkey:?}"))?;
+
+    *state.current.lock() = Some(shortcut);
+    tracing::info!("text expander armed: {hotkey}");
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_shortcut_accepts_alt_backquote() {
+        let s = parse_shortcut("Alt+Backquote").expect("should parse");
+        // Modifiers tolerate any case — verify via a different mod casing.
+        assert_eq!(s, parse_shortcut("ALT+Backquote").unwrap());
+        assert_eq!(s, parse_shortcut("alt+Backquote").unwrap());
+        // Codes must match the W3C `KeyboardEvent.code` PascalCase exactly,
+        // since that's what the frontend always sends.
+        assert!(parse_shortcut("Alt+backquote").is_err());
+    }
+
+    #[test]
+    fn parse_shortcut_accepts_intl_backslash() {
+        // The whole reason we don't use the Tauri plugin's parser — its
+        // table doesn't include IntlBackslash, but `keyboard_types` does.
+        // German ISO macOS keyboards report the top-left `^/°` key as
+        // IntlBackslash via WebKit, so this is a real path users hit.
+        parse_shortcut("Alt+IntlBackslash").expect("IntlBackslash must parse");
+        parse_shortcut("Ctrl+Shift+IntlBackslash").expect("with multiple mods");
+    }
+
+    #[test]
+    fn parse_shortcut_supports_every_letter_and_function_key() {
+        for code in ["KeyA", "KeyZ", "Digit0", "Digit9", "F1", "F12", "F19"] {
+            parse_shortcut(&format!("Alt+{code}"))
+                .unwrap_or_else(|e| panic!("{code} did not parse: {e:#}"));
+        }
+    }
+
+    #[test]
+    fn parse_shortcut_supports_modifier_aliases() {
+        // CmdOrCtrl is the cross-platform alias the Tauri plugin advertises.
+        parse_shortcut("CmdOrCtrl+KeyV").expect("alias must parse");
+        parse_shortcut("Cmd+KeyV").expect("Cmd alias must parse");
+        parse_shortcut("Option+KeyV").expect("Option alias must parse");
+    }
+
+    #[test]
+    fn parse_shortcut_rejects_unknown_modifier() {
+        let err = parse_shortcut("Hyper+KeyA")
+            .expect_err("Hyper is not a Tauri modifier")
+            .to_string();
+        assert!(err.contains("unknown modifier"), "got: {err}");
+    }
+
+    #[test]
+    fn parse_shortcut_rejects_unknown_code() {
+        let err = parse_shortcut("Alt+NotAKey")
+            .expect_err("garbage code must error")
+            .to_string();
+        assert!(err.contains("unknown key code"), "got: {err}");
+    }
+
+    #[test]
+    fn parse_shortcut_rejects_empty_input() {
+        assert!(parse_shortcut("").is_err());
+        assert!(parse_shortcut("   ").is_err());
+    }
+
+    #[test]
+    fn parse_shortcut_rejects_dangling_plus() {
+        // "Alt+" or "+KeyA" produce empty tokens — should fail loudly.
+        assert!(parse_shortcut("Alt+").is_err());
+        assert!(parse_shortcut("+KeyA").is_err());
+    }
+
+    #[test]
+    fn parse_shortcut_accepts_single_key_no_modifier() {
+        // Single-key shortcuts (e.g. F19) are valid. The plugin happily
+        // registers them — we should accept them too.
+        parse_shortcut("F19").expect("bare F19 must parse");
+    }
 }
 
 pub fn toggle_popup(app: &AppHandle) -> Result<()> {

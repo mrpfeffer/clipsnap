@@ -1,11 +1,16 @@
+use serde::Serialize;
 use std::sync::atomic::Ordering;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 
+use crate::backup::{self, BackupImportResult};
 use crate::clipboard_watcher::WatcherState;
 use crate::db::{self, DbHandle};
-use crate::hotkey;
+use crate::expander;
+use crate::hotkey::{self, ExpanderShortcutState};
 use crate::models::ClipEntry;
+use crate::notes::{self, Note};
 use crate::paste;
+use crate::settings;
 use crate::snippets::{self, ImportResult, Snippet};
 use crate::ui_state::UiState;
 
@@ -84,6 +89,16 @@ pub fn get_capture_state(state: State<'_, WatcherState>) -> bool {
 pub fn hide_popup(app: AppHandle) -> Result<(), String> {
     hotkey::hide_popup(&app);
     Ok(())
+}
+
+/// Hide the popup, write `text` to the clipboard, and synthesize the paste
+/// shortcut. Used by the inline calculator (and any other "compute and
+/// paste" flow). The freshly-written clipboard entry will be picked up by
+/// the watcher and recorded in history naturally.
+#[tauri::command]
+pub fn paste_text(app: AppHandle, text: String) -> Result<(), String> {
+    hotkey::hide_popup(&app);
+    paste::paste_text(&text).map_err(map_err)
 }
 
 /// Toggle the popup's hide-on-blur behaviour. The frontend sets this to
@@ -174,4 +189,255 @@ pub fn import_snippets_from_file(
     let json = std::fs::read_to_string(&path)
         .map_err(|e| format!("read {path}: {e}"))?;
     snippets::import_from_json(&db, &json).map_err(map_err)
+}
+
+// ── Notes ────────────────────────────────────────────────────────────────────
+
+#[tauri::command]
+pub fn list_notes(db: State<'_, DbHandle>) -> Result<Vec<Note>, String> {
+    notes::list_all(&db).map_err(map_err)
+}
+
+#[tauri::command]
+pub fn list_note_categories(db: State<'_, DbHandle>) -> Result<Vec<String>, String> {
+    notes::list_categories(&db).map_err(map_err)
+}
+
+/// Promote a clipboard entry to a persistent note. Returns the note's id.
+/// Errors if the clip no longer exists (e.g. just got pruned).
+#[tauri::command]
+pub fn save_clip_as_note(
+    db: State<'_, DbHandle>,
+    clip_id: i64,
+    title: String,
+    category: String,
+) -> Result<i64, String> {
+    notes::save_from_clip(&db, clip_id, &title, &category)
+        .map_err(map_err)?
+        .ok_or_else(|| "clipboard entry not found".to_string())
+}
+
+#[tauri::command]
+pub fn create_note(
+    db: State<'_, DbHandle>,
+    title: String,
+    body: String,
+    category: String,
+) -> Result<i64, String> {
+    notes::create_text(&db, &title, &body, &category).map_err(map_err)
+}
+
+#[tauri::command]
+pub fn update_note(
+    db: State<'_, DbHandle>,
+    id: i64,
+    title: String,
+    body: String,
+    category: String,
+) -> Result<(), String> {
+    notes::update(&db, id, &title, &body, &category).map_err(map_err)
+}
+
+#[tauri::command]
+pub fn delete_note(db: State<'_, DbHandle>, id: i64) -> Result<(), String> {
+    notes::delete(&db, id).map_err(map_err)
+}
+
+#[tauri::command]
+pub fn clear_notes(db: State<'_, DbHandle>) -> Result<(), String> {
+    notes::clear_all(&db).map_err(map_err)
+}
+
+/// Paste a note: hide popup, write payload to clipboard (preserving its
+/// original content type — image/html/rtf/etc.), then send the paste
+/// shortcut.
+#[tauri::command]
+pub fn paste_note(
+    app: AppHandle,
+    db: State<'_, DbHandle>,
+    id: i64,
+) -> Result<(), String> {
+    let note = notes::get(&db, id)
+        .map_err(map_err)?
+        .ok_or_else(|| "note not found".to_string())?;
+
+    hotkey::hide_popup(&app);
+    paste::paste_payload(note.content_type, &note.content_data, &note.content_text)
+        .map_err(map_err)
+}
+
+// ── Backup (full app export / import) ────────────────────────────────────────
+
+/// Build a backup JSON document covering history + snippets + notes.
+/// The frontend takes the returned string and writes it to a user-chosen
+/// file via `tauri-plugin-dialog`'s `save()`.
+#[tauri::command]
+pub fn export_backup(db: State<'_, DbHandle>) -> Result<String, String> {
+    backup::export_json(&db).map_err(map_err)
+}
+
+/// Convenience: build the backup JSON and write it directly to `path`.
+/// Returns the number of bytes written.
+#[tauri::command]
+pub fn save_backup_to_file(
+    db: State<'_, DbHandle>,
+    path: String,
+) -> Result<usize, String> {
+    let json = backup::export_json(&db).map_err(map_err)?;
+    std::fs::write(&path, &json).map_err(|e| format!("write {path}: {e}"))?;
+    Ok(json.len())
+}
+
+/// Read a backup JSON file from `path` and merge it into the live database
+/// (snippets upsert by abbreviation, history dedupes by hash, notes are
+/// appended).
+#[tauri::command]
+pub fn import_backup(
+    db: State<'_, DbHandle>,
+    path: String,
+) -> Result<BackupImportResult, String> {
+    let json = std::fs::read_to_string(&path)
+        .map_err(|e| format!("read {path}: {e}"))?;
+    backup::import_json(&db, &json).map_err(map_err)
+}
+
+// ── Text expander ────────────────────────────────────────────────────────────
+
+#[derive(Debug, Serialize)]
+pub struct ExpanderConfig {
+    pub enabled: bool,
+    pub hotkey: String,
+    /// Whether the OS-level synthetic-input permission is granted.
+    /// macOS: Accessibility. Other OSes: always `true`.
+    pub accessibility_granted: bool,
+}
+
+/// Read the expander config from the settings table, applying defaults
+/// for any missing key. Used by the frontend on Settings panel mount.
+#[tauri::command]
+pub fn get_expander_config(db: State<'_, DbHandle>) -> Result<ExpanderConfig, String> {
+    let enabled = settings::get_bool(&db, expander::KEY_ENABLED, false).map_err(map_err)?;
+    let hotkey = settings::get_or(&db, expander::KEY_HOTKEY, expander::DEFAULT_HOTKEY)
+        .map_err(map_err)?;
+    Ok(ExpanderConfig {
+        enabled,
+        hotkey,
+        accessibility_granted: expander::accessibility_granted(),
+    })
+}
+
+/// Probe whether ClipSnap currently has Accessibility access. Cheap; safe
+/// to call repeatedly (e.g. polling from the Settings panel after the
+/// user grants in System Settings).
+#[tauri::command]
+pub fn get_accessibility_status() -> bool {
+    expander::accessibility_granted()
+}
+
+/// Trigger the macOS "would like to control this computer" dialog and
+/// add ClipSnap to the Accessibility list. Returns the (still-likely-false)
+/// trusted status immediately after the prompt fires.
+#[tauri::command]
+pub fn request_accessibility_grant() -> bool {
+    expander::request_accessibility_grant()
+}
+
+/// Open the System Settings → Privacy & Security → Accessibility pane
+/// (macOS only). On other OSes this is a no-op.
+#[tauri::command]
+pub fn open_accessibility_settings() -> Result<(), String> {
+    expander::open_accessibility_settings().map_err(map_err)
+}
+
+/// Quit the running app process. Intended for the Settings panel's
+/// "Quit ClipSnap" button after the user grants Accessibility — macOS
+/// caches `AXIsProcessTrusted()` per-process, so a freshly granted app
+/// stays "untrusted" until restarted.
+#[tauri::command]
+pub fn quit_app(app: AppHandle) {
+    app.exit(0);
+}
+
+/// Relaunch ClipSnap by spawning a fresh instance of the installed `.app`
+/// and exiting the current process. Used by the Settings panel's auto-
+/// restart prompt after the user grants Accessibility — `open` returns
+/// immediately, the new ClipSnap process inherits the just-granted TCC
+/// state, and the old process exits cleanly.
+///
+/// macOS-only meaningful behaviour. On other platforms it just exits.
+#[tauri::command]
+pub fn relaunch_app(app: AppHandle) {
+    #[cfg(target_os = "macos")]
+    {
+        // Detach `open` so the spawned process is fully owned by launchd —
+        // not by us — and survives the `app.exit(0)` that follows.
+        let _ = std::process::Command::new("open")
+            .arg("-n") // -n: open a new instance even if one is already running
+            .arg("/Applications/ClipSnap.app")
+            .spawn();
+        // Tiny delay so `open` has a chance to actually fork before we exit.
+        std::thread::sleep(std::time::Duration::from_millis(150));
+    }
+    app.exit(0);
+}
+
+/// Persist a new expander config and re-register the global hotkey.
+/// Returns the (now-effective) config so the frontend can confirm what
+/// actually got applied — if the hotkey string was malformed, the function
+/// errors *before* writing settings, leaving the previous registration in
+/// place.
+#[tauri::command]
+pub fn set_expander_config(
+    app: AppHandle,
+    db: State<'_, DbHandle>,
+    state: State<'_, ExpanderShortcutState>,
+    enabled: bool,
+    hotkey: String,
+) -> Result<ExpanderConfig, String> {
+    // Re-register first — if the hotkey is invalid, this fails and we
+    // don't touch the persisted settings.
+    hotkey::register_expander(&app, &state, &hotkey, enabled).map_err(map_err)?;
+
+    settings::set(&db, expander::KEY_HOTKEY, &hotkey).map_err(map_err)?;
+    settings::set(
+        &db,
+        expander::KEY_ENABLED,
+        if enabled { "true" } else { "false" },
+    )
+    .map_err(map_err)?;
+
+    Ok(ExpanderConfig {
+        enabled,
+        hotkey,
+        accessibility_granted: expander::accessibility_granted(),
+    })
+}
+
+/// Trigger an expand-at-cursor cycle programmatically (no hotkey press).
+/// Hides the popup first so the synthetic Cmd+Shift+← / Cmd+C / Cmd+V
+/// land in the previously focused app instead of ClipSnap itself.
+#[tauri::command]
+pub fn trigger_expand_at_cursor(app: AppHandle) -> Result<(), String> {
+    hotkey::hide_popup(&app);
+    // Give macOS a moment to hand key focus back to the prior app.
+    std::thread::sleep(std::time::Duration::from_millis(250));
+    let db = app
+        .try_state::<DbHandle>()
+        .ok_or_else(|| "db state not initialized".to_string())?;
+    expander::expand_at_cursor(&db).map_err(map_err)
+}
+
+/// Diagnose the capture half of expansion: select previous word, copy,
+/// look up — but **don't paste**. Returns what was captured and whether
+/// any snippet matches. Used by the Settings panel's "Test now" button.
+#[tauri::command]
+pub fn diagnose_expand_at_cursor(
+    app: AppHandle,
+) -> Result<expander::DiagnoseResult, String> {
+    hotkey::hide_popup(&app);
+    std::thread::sleep(std::time::Duration::from_millis(250));
+    let db = app
+        .try_state::<DbHandle>()
+        .ok_or_else(|| "db state not initialized".to_string())?;
+    expander::diagnose_at_cursor(&db).map_err(map_err)
 }

@@ -1,11 +1,15 @@
 //! `clipsnap-core` — shared, OS-independent app logic for ClipSnap.
 
+mod backup;
 mod clipboard_watcher;
 mod commands;
 mod db;
+mod expander;
 mod hotkey;
 mod models;
+mod notes;
 mod paste;
+mod settings;
 mod snippets;
 mod ui_state;
 
@@ -42,6 +46,8 @@ pub fn run(context: tauri::Context<Wry>) {
             let db_handle = db::open(&db_path)?;
 
             snippets::init_table(&db_handle)?;
+            notes::init_table(&db_handle)?;
+            settings::init_table(&db_handle)?;
 
             let watcher_state = WatcherState::new();
             let paused = watcher_state.paused.clone();
@@ -49,11 +55,38 @@ pub fn run(context: tauri::Context<Wry>) {
             let ui_state = UiState::default();
             let suppress_hide = ui_state.suppress_hide.clone();
 
+            let expander_state = hotkey::ExpanderShortcutState::default();
+
             app.manage(db_handle.clone());
             app.manage(watcher_state);
             app.manage(ui_state);
+            app.manage(expander_state);
 
             hotkey::register(&app.handle())?;
+
+            // Restore the expander hotkey from settings if it was enabled
+            // last time the app ran. Default is disabled — opt-in.
+            {
+                let enabled = settings::get_bool(&db_handle, expander::KEY_ENABLED, false)
+                    .unwrap_or(false);
+                let hotkey_str = settings::get_or(
+                    &db_handle,
+                    expander::KEY_HOTKEY,
+                    expander::DEFAULT_HOTKEY,
+                )
+                .unwrap_or_else(|_| expander::DEFAULT_HOTKEY.to_string());
+                let state = app
+                    .state::<hotkey::ExpanderShortcutState>();
+                if let Err(e) = hotkey::register_expander(
+                    &app.handle(),
+                    &state,
+                    &hotkey_str,
+                    enabled,
+                ) {
+                    tracing::warn!("expander hotkey register failed at startup: {e:#}");
+                }
+            }
+
             clipboard_watcher::spawn(app.handle().clone(), db_handle, paused);
 
             build_tray(&app.handle())?;
@@ -90,6 +123,7 @@ pub fn run(context: tauri::Context<Wry>) {
             commands::toggle_capture,
             commands::get_capture_state,
             commands::hide_popup,
+            commands::paste_text,
             commands::list_snippets,
             commands::find_snippets,
             commands::upsert_snippet,
@@ -98,6 +132,26 @@ pub fn run(context: tauri::Context<Wry>) {
             commands::import_snippets,
             commands::import_snippets_from_file,
             commands::set_suppress_hide,
+            commands::list_notes,
+            commands::list_note_categories,
+            commands::save_clip_as_note,
+            commands::create_note,
+            commands::update_note,
+            commands::delete_note,
+            commands::clear_notes,
+            commands::paste_note,
+            commands::export_backup,
+            commands::save_backup_to_file,
+            commands::import_backup,
+            commands::get_expander_config,
+            commands::set_expander_config,
+            commands::trigger_expand_at_cursor,
+            commands::diagnose_expand_at_cursor,
+            commands::get_accessibility_status,
+            commands::request_accessibility_grant,
+            commands::open_accessibility_settings,
+            commands::quit_app,
+            commands::relaunch_app,
         ])
         .run(context)
         .expect("error while running ClipSnap");
@@ -106,6 +160,7 @@ pub fn run(context: tauri::Context<Wry>) {
 fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
     let open_item = MenuItemBuilder::with_id("open", "Open (Ctrl+Shift+V)").build(app)?;
     let snippets_item = MenuItemBuilder::with_id("snippets", "Manage Snippets").build(app)?;
+    let notes_item = MenuItemBuilder::with_id("notes", "Manage Notes").build(app)?;
     let pause_item = MenuItemBuilder::with_id("pause", "Pause Capture").build(app)?;
     let clear_item = MenuItemBuilder::with_id("clear", "Clear History…").build(app)?;
     let autostart_label = if cfg!(target_os = "windows") { "Start with Windows" } else { "Start at Login" };
@@ -119,6 +174,7 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
         .items(&[
             &open_item,
             &snippets_item,
+            &notes_item,
             &sep,
             &pause_item,
             &autostart_item,
@@ -143,6 +199,12 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
                     tracing::warn!("show popup for snippets: {e:#}");
                 }
                 let _ = app.emit("open-snippets-tab", ());
+            }
+            "notes" => {
+                if let Err(e) = hotkey::show_popup(app) {
+                    tracing::warn!("show popup for notes: {e:#}");
+                }
+                let _ = app.emit("open-notes-tab", ());
             }
             "pause" => {
                 if let Some(state) = app.try_state::<WatcherState>() {

@@ -17,32 +17,42 @@ use crate::models::{ClipEntry, ContentType};
 /// popup opened. Caller should hide the popup (and on macOS the whole app)
 /// *before* calling this so focus returns to the previous app.
 pub fn paste_entry(entry: &ClipEntry) -> Result<()> {
-    write_to_clipboard(entry)?;
+    paste_payload(entry.content_type, &entry.content_data, &entry.content_text)
+}
+
+/// Write a typed payload to the clipboard and synthesize the paste shortcut.
+///
+/// `data` carries the type-specific raw payload (raw text for Text/Html/Rtf,
+/// base64 PNG for Image, JSON array of paths for Files). `text` is a plain
+/// fallback used by the Files branch (which clipboard-rs cannot set as a
+/// real file list on all platforms).
+pub fn paste_payload(content_type: ContentType, data: &str, text: &str) -> Result<()> {
+    write_to_clipboard(content_type, data, text)?;
     thread::sleep(focus_settle_delay());
     send_paste_shortcut()?;
     Ok(())
 }
 
-fn write_to_clipboard(entry: &ClipEntry) -> Result<()> {
+fn write_to_clipboard(content_type: ContentType, data: &str, text: &str) -> Result<()> {
     let ctx = ClipboardContext::new()
         .map_err(|e| anyhow!("clipboard ctx init failed: {e:?}"))?;
 
-    match entry.content_type {
+    match content_type {
         ContentType::Text => {
-            ctx.set_text(entry.content_data.clone())
+            ctx.set_text(data.to_string())
                 .map_err(|e| anyhow!("set_text failed: {e:?}"))?;
         }
         ContentType::Html => {
-            ctx.set_html(entry.content_data.clone())
+            ctx.set_html(data.to_string())
                 .map_err(|e| anyhow!("set_html failed: {e:?}"))?;
         }
         ContentType::Rtf => {
-            ctx.set_rich_text(entry.content_data.clone())
+            ctx.set_rich_text(data.to_string())
                 .map_err(|e| anyhow!("set_rich_text failed: {e:?}"))?;
         }
         ContentType::Image => {
             let bytes = B64
-                .decode(entry.content_data.as_bytes())
+                .decode(data.as_bytes())
                 .context("decode image base64")?;
             let img = RustImageData::from_bytes(&bytes)
                 .map_err(|e| anyhow!("decode png failed: {e:?}"))?;
@@ -52,7 +62,7 @@ fn write_to_clipboard(entry: &ClipEntry) -> Result<()> {
         ContentType::Files => {
             // clipboard-rs does not currently support setting file lists on
             // all platforms; fall back to joining paths as text.
-            ctx.set_text(entry.content_text.clone())
+            ctx.set_text(text.to_string())
                 .map_err(|e| anyhow!("set_text (files fallback) failed: {e:?}"))?;
         }
     }
