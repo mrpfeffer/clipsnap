@@ -11,6 +11,7 @@ mod notes;
 mod paste;
 mod settings;
 mod snippets;
+mod text_field;
 mod ui_state;
 
 pub use ui_state::UiState;

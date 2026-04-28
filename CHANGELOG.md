@@ -4,6 +4,34 @@ All notable changes to ClipSnap are documented here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] — 2026-04-28
+
+### Added — Accessibility-first text expander
+
+- **The text expander now reads the focused field directly via the OS accessibility layer** instead of synthesising `Cmd/Ctrl+Shift+←` + `Cmd/Ctrl+C` as the *primary* path. macOS uses **`AXUIElement`** (ApplicationServices), Windows uses **`IUIAutomation`** (UIAutomationCore). Same Accessibility permission already required for paste; no new permission added. Native FFI — no objc2/winRT macros needed. — *#feat(expander)*
+  - **Why it matters:** the keystroke approach works in 90 % of apps but breaks in terminals (iTerm2, kitty, gnome-terminal — they reinterpret `Cmd/Ctrl+Shift+←` as pane-switch / mark-selection), web apps with custom keyboard handlers (Google Docs, online IDEs), and password fields. The accessibility approach succeeds wherever the focused element exposes its value to assistive tech — which is essentially every text field a screen reader can read.
+  - **No more clipboard touch on the happy path.** When AX/UIA succeeds the user's clipboard is left completely untouched and there's no visible selection flicker.
+  - **Clipboard fallback retained.** When the focused element doesn't expose the necessary attributes (rare native Carbon, Java/Swing without AccessBridge), ClipSnap falls back to the previous keystroke + clipboard roundtrip seamlessly.
+- **`text_field` module** — new abstraction in [`core/rust-lib/src/text_field/`](./core/rust-lib/src/text_field/):
+  - `mod.rs` — `FieldAccess` trait + `CapturePath { Ax, Uia, Clipboard }` enum + UTF-16 ↔ char-index helpers + the platform-agnostic `word_start_before_cursor` algorithm. 7 unit tests covering ASCII, German umlauts, emoji (supplementary plane), cursor past end, whitespace-only.
+  - `macos.rs` — raw FFI to `AXUIElementCreateSystemWide` / `AXUIElementCopyAttributeValue` / `AXUIElementSetAttributeValue` for the three attributes that matter: `AXFocusedUIElement`, `AXValue`, `AXSelectedTextRange`. UTF-16 helpers because AX reports cursor positions in UTF-16 code units. 3 unit tests.
+  - `windows.rs` — `windows` crate bindings to `IUIAutomation`, `IUIAutomationTextPattern`, `IUIAutomationTextRange`. Uses UIA for the *read* (reliable) but deliberately uses Backspace×N + `enigo.text(body)` for the *write*, because UIA's `IUIAutomationTextEditPattern2::Replace` is patchily implemented across real-world Windows controls.
+- **`Capture path` row in the Diagnose UI** — Settings → *Text expander* → Diagnose now shows whether the run used `macOS AX (clean — no clipboard touch)`, `Windows UIA (clean — no clipboard touch)`, or fell back to the `Clipboard fallback` path. Lets you tell at a glance whether the app you're testing in has working accessibility.
+
+### Changed
+
+- `expander::expand_at_cursor` and `expander::diagnose_at_cursor` now try AX/UIA first; the legacy clipboard roundtrip is the second-choice fallback. The fallback path can also be invoked with prefetched abbreviation+body so the lookup isn't repeated when AX read succeeded but AX replace didn't.
+- `core/rust-lib/Cargo.toml` — added `windows = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Com", "Win32_UI_Accessibility"] }` as a `target.'cfg(target_os = "windows")'` dependency. macOS / Linux builds don't pull it in.
+- **`DiagnoseResult`** gains a `path: "ax" | "uia" | "clipboard"` field. Frontend `ipc.ts` interface updated to match.
+
+### Why bump to 0.3.0
+
+This is a real architecture change for the expander — the keystroke path is no longer the default. Bumping the minor signals that the failure modes (and therefore the user-visible behaviour) shift. The fallback path keeps full backward compatibility — every app that worked in 0.2.x still works in 0.3.0, just often via a cleaner mechanism.
+
+### Tests
+
+`cargo test --workspace`: **74 → 84 green** (+7 word-boundary, +3 UTF-16). `pnpm test`: 53 unchanged.
+
 ## [0.2.12] — 2026-04-28
 
 ### Changed
@@ -291,6 +319,7 @@ These are documented in [`docs/text-expander.md`](./docs/text-expander.md), surf
 - System tray menu: Open · Pause Capture · Clear History · Start with Windows · Quit.
 - pnpm + Cargo workspaces with shared [`core/`](./core) and [`win/`](./win) bundle shell.
 
+[0.3.0]: https://github.com/pepperonas/clipsnap/releases/tag/v0.3.0
 [0.2.12]: https://github.com/pepperonas/clipsnap/releases/tag/v0.2.12
 [0.2.11]: https://github.com/pepperonas/clipsnap/releases/tag/v0.2.11
 [0.2.10]: https://github.com/pepperonas/clipsnap/releases/tag/v0.2.10

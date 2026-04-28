@@ -32,6 +32,7 @@ use std::time::Duration;
 
 use crate::db::DbHandle;
 use crate::snippets;
+use crate::text_field::{default_field_access, native_path, CapturePath};
 
 // Whether the OS has granted ClipSnap permission to synthesize keyboard
 // events (macOS Accessibility / "Privacy & Security" → Accessibility).
@@ -158,44 +159,59 @@ pub const DEFAULT_HOTKEY: &str = "Alt+Backquote";
 /// captured text was empty, …) instead of a silent no-op.
 #[derive(Debug, Serialize)]
 pub struct DiagnoseResult {
-    /// The whitespace-trimmed text that landed in the clipboard after
-    /// `Cmd/Ctrl+Shift+←` + `Cmd/Ctrl+C`. Empty string if nothing was
-    /// selected (no text before the cursor).
+    /// The whitespace-trimmed text captured before the cursor. Empty
+    /// string if nothing was selectable (no text before the cursor).
     pub captured: String,
     /// Set when `find_by_exact_abbreviation` returned a row.
     pub matched_abbreviation: Option<String>,
     /// First ~80 characters of the matched snippet body — gives the user
     /// confidence the right snippet would be pasted.
     pub paste_preview: Option<String>,
+    /// Which capture mechanism actually succeeded:
+    /// - `ax` — macOS Accessibility API (`AXUIElement`).
+    /// - `uia` — Windows UI Automation (`IUIAutomation`).
+    /// - `clipboard` — fell back to `Cmd/Ctrl+Shift+←` + `Cmd/Ctrl+C`.
+    pub path: CapturePath,
 }
 
-/// Run the capture half of `expand_at_cursor` (select previous word +
-/// copy + look up) **without** pasting. Restores the user's clipboard
-/// before returning. Used for "Test now" in the Settings panel — the
-/// caller is responsible for hiding the popup *before* this runs so the
-/// synthetic keystrokes target the source app, not ClipSnap itself.
+/// Run the capture half of expansion (read the word before the cursor,
+/// look it up) **without** pasting. The caller is responsible for hiding
+/// the popup *before* this runs so the AX/UIA call targets the source
+/// app, not ClipSnap itself.
+///
+/// Capture-path policy:
+/// 1. **Try AX (macOS) / UIA (Windows) first.** No keystroke synthesis,
+///    no clipboard touch — the cleanest path. Works in any app that
+///    exposes its focused field through accessibility.
+/// 2. **Fall back to the clipboard roundtrip** (`Cmd/Ctrl+Shift+←` +
+///    `Cmd/Ctrl+C`) only when AX/UIA returns `None`. The user's
+///    clipboard is saved and restored around the operation.
 pub fn diagnose_at_cursor(db: &DbHandle) -> Result<DiagnoseResult> {
-    // 1) Save the current clipboard text.
-    let saved = read_clipboard_text();
-
-    // 2) Select the previous word and copy.
-    select_previous_word()?;
-    thread::sleep(Duration::from_millis(30));
-    send_copy()?;
-    thread::sleep(Duration::from_millis(80));
-
-    // 3) Read what got captured.
-    let captured_raw = read_clipboard_text().unwrap_or_default();
-    let captured = trim_abbreviation(&captured_raw).to_string();
-
-    // 4) Restore clipboard *before* doing the DB lookup, so even if the
-    //    lookup is slow, the user's clipboard is back quickly.
-    restore_clipboard(saved.as_deref());
+    // 1) AX/UIA first — clean read, no side effects.
+    let access = default_field_access();
+    let (captured, path) = match access.read_word_before_cursor() {
+        Ok(Some(word)) => (word, native_path()),
+        Ok(None) | Err(_) => {
+            // 2) Fall back to the clipboard roundtrip.
+            let saved = read_clipboard_text();
+            select_previous_word()?;
+            thread::sleep(Duration::from_millis(30));
+            send_copy()?;
+            thread::sleep(Duration::from_millis(80));
+            let captured_raw = read_clipboard_text().unwrap_or_default();
+            restore_clipboard(saved.as_deref());
+            (
+                trim_abbreviation(&captured_raw).to_string(),
+                CapturePath::Clipboard,
+            )
+        }
+    };
 
     let mut result = DiagnoseResult {
         captured: captured.clone(),
         matched_abbreviation: None,
         paste_preview: None,
+        path,
     };
 
     if !captured.is_empty() {
@@ -218,35 +234,100 @@ pub fn diagnose_at_cursor(db: &DbHandle) -> Result<DiagnoseResult> {
 /// Run a full expand-at-cursor cycle. Errors are returned for logging but
 /// the orchestration layer (the hotkey handler) treats them as recoverable
 /// — the next press starts a fresh attempt.
+///
+/// Tries AX (macOS) / UIA (Windows) **first** — the clean path with no
+/// clipboard touch and no flickering selection. Falls back to the
+/// keystroke + clipboard roundtrip only when the focused element doesn't
+/// expose accessibility info.
 pub fn expand_at_cursor(db: &DbHandle) -> Result<()> {
-    // 1) Save current clipboard text (best-effort).
+    // ── Path 1: native accessibility (AX / UIA) ────────────────────────────
+    let access = default_field_access();
+    if let Ok(Some(word)) = access.read_word_before_cursor() {
+        if let Some(snippet) = snippets::find_by_exact_abbreviation(db, &word)? {
+            // Try the in-place replace via the same accessibility layer.
+            // Returns false when the focused element exposes a value/range
+            // for *reading* but not for setting — which is rare on macOS
+            // (most AX-aware fields support both) but normal on Windows
+            // (UiaFieldAccess deliberately uses Backspace+type for the
+            // write half because UIA's Replace is patchily implemented).
+            match access.try_replace_word_before_cursor(&snippet.body) {
+                Ok(true) => return Ok(()),
+                Ok(false) => {
+                    tracing::debug!(
+                        "AX/UIA replace not supported for this element; \
+                         falling back to clipboard paste"
+                    );
+                    // Fall through to the keystroke path below, but reuse
+                    // the abbreviation we already captured (so we don't
+                    // do select-prev-word again — the cursor is in the
+                    // same place).
+                    return expand_via_clipboard(db, Some(&word), Some(&snippet.body));
+                }
+                Err(e) => {
+                    tracing::warn!("AX/UIA replace errored: {e:#}; falling back");
+                    return expand_via_clipboard(db, Some(&word), Some(&snippet.body));
+                }
+            }
+        }
+        // No snippet matched. We still want the user to *see* the failure
+        // — leaving the field untouched is the right move; no fallback
+        // needed for the no-match case.
+        return Ok(());
+    }
+
+    // ── Path 2: clipboard roundtrip (legacy) ───────────────────────────────
+    expand_via_clipboard(db, None, None)
+}
+
+/// Pre-AX/UIA expand path. Used as a fallback when the focused element
+/// doesn't expose accessibility, and (with `prefetched_*` set) when
+/// AX/UIA gave us the abbreviation + body but couldn't perform the
+/// replace itself — we still need keystroke synthesis to actually
+/// replace the word.
+fn expand_via_clipboard(
+    db: &DbHandle,
+    prefetched_word: Option<&str>,
+    prefetched_body: Option<&str>,
+) -> Result<()> {
     let saved = read_clipboard_text();
 
-    // 2) Select the previous word, then copy it.
+    // Select-prev-word + copy is only needed when we don't already know
+    // the abbreviation. With prefetched data the cursor is still right
+    // after the abbreviation but no selection exists yet — re-select.
     select_previous_word()?;
     thread::sleep(Duration::from_millis(30));
     send_copy()?;
     thread::sleep(Duration::from_millis(80));
 
-    // 3) Read the just-selected word.
     let abbr_raw = read_clipboard_text().unwrap_or_default();
-    let abbr = trim_abbreviation(&abbr_raw);
+    let abbr = if let Some(w) = prefetched_word {
+        // Prefer the AX-captured word — guards against the clipboard
+        // capturing the wrong region in apps that mistreat Shift+Left.
+        w
+    } else {
+        trim_abbreviation(&abbr_raw)
+    };
     if abbr.is_empty() {
         restore_clipboard(saved.as_deref());
         return Ok(());
     }
 
-    // 4) Look it up.
-    let hit = snippets::find_by_exact_abbreviation(db, abbr)?;
-    let Some(snippet) = hit else {
-        // Selection stays highlighted in the source app — visual cue that
-        // nothing matched. Restore the user's clipboard before bailing.
-        restore_clipboard(saved.as_deref());
-        return Ok(());
+    // 4) Look it up — unless the AX/UIA path already gave us the body.
+    let body = if let Some(b) = prefetched_body {
+        b.to_string()
+    } else {
+        let hit = snippets::find_by_exact_abbreviation(db, abbr)?;
+        let Some(snippet) = hit else {
+            // Selection stays highlighted in the source app — visual cue
+            // that nothing matched. Restore clipboard before bailing.
+            restore_clipboard(saved.as_deref());
+            return Ok(());
+        };
+        snippet.body
     };
 
     // 5) Replace selection: write the body, paste over the highlight.
-    write_clipboard_text(&snippet.body)?;
+    write_clipboard_text(&body)?;
     thread::sleep(Duration::from_millis(30));
     send_paste()?;
 

@@ -456,6 +456,22 @@ export function SettingsPanel({ onBackupImported }: Props = {}) {
             {diagnose?.kind === "result" && (
               <div className="rounded border border-[var(--color-border)] bg-[var(--color-surface)] p-2 text-[11px]">
                 <div className="grid grid-cols-[110px_1fr] gap-x-3 gap-y-1">
+                  <span className="text-[var(--color-muted)]">Capture path</span>
+                  <span>
+                    {diagnose.data.path === "ax" ? (
+                      <span className="rounded bg-emerald-500/10 px-1.5 py-0.5 font-medium text-emerald-400">
+                        macOS AX (clean — no clipboard touch)
+                      </span>
+                    ) : diagnose.data.path === "uia" ? (
+                      <span className="rounded bg-emerald-500/10 px-1.5 py-0.5 font-medium text-emerald-400">
+                        Windows UIA (clean — no clipboard touch)
+                      </span>
+                    ) : (
+                      <span className="rounded bg-amber-500/10 px-1.5 py-0.5 font-medium text-amber-400">
+                        Clipboard fallback — focused app didn&apos;t expose accessibility info
+                      </span>
+                    )}
+                  </span>
                   <span className="text-[var(--color-muted)]">Captured</span>
                   <code className="rounded bg-[var(--color-bg)] px-1 font-[var(--font-mono)]">
                     {diagnose.data.captured || "(empty)"}

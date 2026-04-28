@@ -16,21 +16,41 @@ The abbreviation is replaced with the snippet body in place.
 
 ## How it works
 
-When you press the hotkey from a focused text field:
+The expander has **two capture paths** since v0.3.0. The hotkey handler tries them in order; the second is a fallback.
 
-1. ClipSnap **saves the current clipboard text** (best-effort).
-2. ClipSnap synthesizes the platform's *select previous word* shortcut:
-   - **macOS:** `Option+Shift+←`
-   - **Windows / Linux X11 / Linux Wayland:** `Ctrl+Shift+←`
-3. ClipSnap synthesizes the platform's *copy* shortcut (`Cmd+C` / `Ctrl+C`) and reads the just-selected word out of the clipboard.
-4. ClipSnap looks the word up in the `snippets` table via [`snippets::find_by_exact_abbreviation`](../core/rust-lib/src/snippets.rs):
-   - **Exact case match** is preferred. (`MFG` matches a snippet stored as `MFG`, not `mfg`.)
-   - **Case-insensitive fallback** if no exact match. (`MFG` matches `mfg` if no `MFG` row exists.)
-5. **Hit:** snippet body is written to the clipboard; ClipSnap synthesizes paste (`Cmd+V` / `Ctrl+V`), which overwrites the still-active selection in the source app.
-6. **Miss:** nothing is pasted. The selection remains visible in the source app — visual cue that the abbreviation didn't match.
-7. After ~150 ms (long enough for the source app to consume the paste) ClipSnap restores the user's original clipboard text.
+### Path 1 (default): Accessibility API — no clipboard touch
 
-The popup is *not* shown during this flow — focus stays in the source app the entire time.
+When you press the hotkey from a focused text field, ClipSnap asks the OS's accessibility layer directly:
+
+- **macOS:** `AXUIElementCreateSystemWide` → `kAXFocusedUIElement` → `kAXValue` (the field's text) + `kAXSelectedTextRange` (cursor position). Compute the word before the cursor in pure code. Replace via `AXUIElementSetAttributeValue(kAXSelectedTextRange + kAXSelectedText)`.
+- **Windows:** `IUIAutomation::GetFocusedElement` → `IUIAutomationTextPattern::GetSelection` → `MoveEndpointByUnit(TextUnit_Word, -1)` to expand the start backwards by one word → `GetText` for the abbreviation. Replace via Backspace × char_count(word) + `enigo.text(body)` (UIA's `Replace` is patchily implemented; SendInput-based Backspace+type is more reliable on Windows).
+- ClipSnap looks the captured word up in the `snippets` table via [`snippets::find_by_exact_abbreviation`](../core/rust-lib/src/snippets.rs) — exact case match preferred, case-insensitive fallback.
+- **No clipboard read or write at all.** The user's clipboard is left untouched, no selection flickers in the source app.
+
+This path requires the same macOS Accessibility permission already needed for paste; on Windows no extra permission is required.
+
+### Path 2 (fallback): keystroke + clipboard roundtrip
+
+When the focused element doesn't expose AX / UIA attributes (rare native Carbon controls, Java/Swing without AccessBridge, niche custom widgets) ClipSnap falls back to the original v0.2.x flow:
+
+1. Save the current clipboard text.
+2. Synthesize *select previous word*: **`Option+Shift+←`** on macOS, **`Ctrl+Shift+←`** elsewhere.
+3. Synthesize *copy* (`Cmd/Ctrl+C`) and read the just-selected word out of the clipboard.
+4. Look up the snippet.
+5. **Hit:** write the body to the clipboard; synthesize paste (`Cmd/Ctrl+V`); after ~150 ms restore the original clipboard text.
+6. **Miss:** nothing is pasted; the selection remains visible as a cue that the abbreviation didn't match.
+
+The popup is *not* shown during either path — focus stays in the source app the entire time.
+
+### How to tell which path was used
+
+Settings → Text expander → **Diagnose** now reports the path it took:
+
+- 🟢 *macOS AX (clean — no clipboard touch)*
+- 🟢 *Windows UIA (clean — no clipboard touch)*
+- 🟡 *Clipboard fallback — focused app didn't expose accessibility info*
+
+If you see the amber fallback in an app you'd expect to support AX/UIA, file an issue with the app name and OS version.
 
 ## Threading model — must run on the main thread (macOS)
 

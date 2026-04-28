@@ -5,7 +5,7 @@
 
   **Fast, lightweight clipboard history manager + text expander for Windows 11**
 
-  [![Version](https://img.shields.io/badge/version-0.2.12-blue?style=flat-square)](https://github.com/pepperonas/clipsnap/releases)
+  [![Version](https://img.shields.io/badge/version-0.3.0-blue?style=flat-square)](https://github.com/pepperonas/clipsnap/releases)
   [![License: MIT](https://img.shields.io/badge/license-MIT-green?style=flat-square)](./LICENSE)
   [![Platform](https://img.shields.io/badge/platform-Windows%2011-0078D4?style=flat-square&logo=windows11&logoColor=white)](./win)
   [![Tauri 2](https://img.shields.io/badge/Tauri-2-FFC131?style=flat-square&logo=tauri&logoColor=white)](https://tauri.app)
@@ -101,14 +101,14 @@ The **Settings** tab's *Backup & restore* section has **Export…** and **Import
 - **Versioned schema** — backups carry a `version` field; ClipSnap refuses to import a backup whose version is newer than the running build, instead of silently dropping fields.
 - Full reference: [`docs/backup.md`](./docs/backup.md).
 
-### System-wide text expander (v0.2.7)
+### System-wide text expander (v0.2.7, accessibility-first since v0.3.0)
 Type a snippet abbreviation in **any** text field, press your configured hotkey, and ClipSnap replaces it in place with the snippet body — like aText / TextExpander, but **trigger-based** (no keylogger).
 
 - **Default hotkey:** `Alt + Backquote` (= `Alt + ^` on a German keyboard, `Alt + \`` on US). Disabled by default — opt in from the **Settings** tab.
 - **Hotkey is configurable** via a click-to-record field in the Settings panel. Bad combinations are rejected without losing your previous registration.
-- **How it works:** ClipSnap synthesizes the OS shortcut for *select previous word* (`Option+Shift+←` macOS / `Ctrl+Shift+←` elsewhere) → copy → look up snippet → paste body over the selection. The user's clipboard is saved before and restored after the cycle.
+- **Two capture paths.** Since v0.3.0 the primary path uses the **OS accessibility layer** (`AXUIElement` on macOS, `IUIAutomation` on Windows) to read the focused field's value and selection range directly — no clipboard touch, no keystroke synthesis, no flickering selection. Falls back to the legacy `Cmd/Ctrl+Shift+← → Cmd/Ctrl+C → look up → Cmd/Ctrl+V` keystroke + clipboard roundtrip when the focused element doesn't expose accessibility info. The Settings panel's **Diagnose** button reports which path was used.
 - **Cross-platform:** macOS / Windows / Linux X11. Wayland depends on the compositor's global-shortcut portal.
-- **Caveats:** terminals (iTerm2, kitty, gnome-terminal) sometimes interpret the word-select shortcut differently; password fields refuse synthetic paste; image/files snippets are not expanded (text only).
+- **Caveats:** terminals (iTerm2, kitty, gnome-terminal) often expose AX/UIA for their content; legacy / hybrid GUI toolkits may not (Java/Swing without AccessBridge, native Carbon — those fall back to keystrokes). Image/files snippets are not expanded (text only).
 - Full reference: [`docs/text-expander.md`](./docs/text-expander.md).
 
 ### Multi-monitor placement
@@ -135,7 +135,8 @@ clipsnap/
 │           ├── notes.rs     # notes table, categories, save_from_clip
 │           ├── backup.rs    # full-app export/import (versioned JSON)
 │           ├── settings.rs  # key/value store (expander hotkey + future prefs)
-│           ├── expander.rs  # trigger-based text expander (clipboard roundtrip)
+│           ├── expander.rs  # trigger-based text expander (AX/UIA primary, clipboard fallback)
+│           ├── text_field/  # FieldAccess trait + macOS AX + Windows UIA implementations
 │           ├── paste.rs     # write_to_clipboard + enigo paste shortcut
 │           ├── hotkey.rs    # global Ctrl+Shift+V + expander hotkey, multi-monitor placement
 │           ├── clipboard_watcher.rs  # event-driven capture, RTF stripping
@@ -232,7 +233,7 @@ Full feature reference: [`docs/notes.md`](./docs/notes.md). Backup file schema a
 
 ```bash
 pnpm test               # frontend unit tests (vitest + happy-dom) — 53 tests
-cargo test --workspace  # Rust unit tests — 74 tests (db, snippets, notes, backup, settings, expander, hotkey parser, clipboard_watcher, models)
+cargo test --workspace  # Rust unit tests — 84 tests (db, snippets, notes, backup, settings, expander, text_field, hotkey parser, clipboard_watcher, models)
 ```
 
 The same commands run in [GitHub Actions CI](./.github/workflows/ci.yml) on every push and PR.
