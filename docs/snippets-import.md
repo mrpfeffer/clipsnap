@@ -95,9 +95,19 @@ To merge several example files into one import, see [`docs/examples/snippets/REA
 - **Keep one file per theme** rather than one mega-file — easier to share, edit, and re-import selectively.
 - **Don't hard-code dynamic data** (timestamps, current commit SHA, etc.). ClipSnap doesn't templatize; what's in the body is what gets pasted. Use placeholders like `<DATE>` and edit after pasting.
 
-## Programmatic export (manual)
+## Export
 
-There is no built-in export command yet. To dump current snippets to JSON, query the SQLite database directly:
+### Built-in (recommended): Settings → Backup & restore
+
+Since v0.2.12 the Settings tab's *Backup & restore* section can write a JSON file containing only your snippets. Untick *Clipboard history* and *Notes*, click **Export…**, pick a path. The resulting file matches the full-backup schema (`{ version, exported_at, history: [], snippets: [...], notes: [] }`); the snippet importer below also accepts the bare-array and `{ snippets: [...] }` shapes for hand-curated files.
+
+To round-trip into another ClipSnap install: paste the file via **Settings → Backup & restore → Import…**. Snippets are upserted by `abbreviation`; the empty `history` and `notes` arrays are no-ops on the destination side.
+
+Full backup-format reference: [`docs/backup.md`](./backup.md).
+
+### SQLite + jq (legacy, hand-curated)
+
+If you want a snippets-only file without the wrapping `{ version, …, history, notes }` envelope, query the database directly:
 
 ```bash
 # macOS
@@ -111,7 +121,7 @@ sqlite3 "$env:APPDATA\ClipSnap\history.db" `
   | ConvertFrom-Json | ConvertTo-Json -Depth 5 > my-snippets.json
 ```
 
-The output is directly re-importable.
+The output is the bare-array form documented above and directly re-importable via **Snippets → Import**.
 
 ## IPC surface (for integrators)
 

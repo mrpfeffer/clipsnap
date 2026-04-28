@@ -33,7 +33,7 @@ Three panes side-by-side:
 
 | Pane | Width | Contents |
 |------|-------|----------|
-| **Categories sidebar** | 25 % (min 180 px) | `All`, `Uncategorized`, then your categories alphabetically (case-insensitive). Each row shows a count. Below the list: **+ New Note**, **Export…**, **Import…**, **Clear All**. |
+| **Categories sidebar** | 25 % (min 180 px) | `All`, `Uncategorized`, then your categories alphabetically (case-insensitive). Each row shows a count. Below the list: **+ New Note** and **Clear All**. (Backup Export / Import moved to the Settings tab in v0.2.12 — see [`docs/backup.md`](./backup.md).) |
 | **Note list** | 40 % | Notes in the selected category, newest first. Hover a row to reveal the per-row delete button. Click selects, double-click pastes. |
 | **Detail / edit pane** | 35 % | Title (optional), Category (free-form, autocompletes from existing categories), Body editor. **Paste**, **Close**, **Save** at the bottom; **Delete** trash icon on the left. |
 
