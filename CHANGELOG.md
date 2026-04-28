@@ -4,6 +4,15 @@ All notable changes to ClipSnap are documented here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] — 2026-04-29
+
+### Fixed
+
+- **macOS Accessibility prompt loop after rebuilds.** Common state after a real source-change install: the toggle in System Settings → Accessibility shows ClipSnap as **enabled**, but ClipSnap still asks for permission on every hotkey press. Cause: the toggle's underlying TCC entry is bound to the *previous* binary's cdhash; the new build has a different cdhash and is treated as a new app. The toggle UI just reports the bundle id, which masked the discrepancy.
+  - **Fix:** new **Force re-grant (clear stale)** button in the amber Accessibility banner. Shells out to `tccutil reset Accessibility io.celox.clipsnap` + `tccutil reset PostEvent io.celox.clipsnap` (no sudo needed for the user's own bundle), then fires `AXIsProcessTrustedWithOptions(prompt: true)` so macOS re-adds ClipSnap to the Accessibility list with the *current* cdhash. Toggling on again creates a TCC entry that matches what the running process actually is. — *#fix(macos)*
+  - The legacy "Try system prompt" button stays as a secondary option (for the rare cases where the entry is sane and just needs a re-prompt).
+- New IPC command `force_reset_and_request_grant` (macOS-only meaningful behaviour; no-op elsewhere). Backend in [`core/rust-lib/src/expander.rs`](./core/rust-lib/src/expander.rs); wrapper in [`core/frontend/src/lib/ipc.ts`](./core/frontend/src/lib/ipc.ts).
+
 ## [0.3.0] — 2026-04-28
 
 ### Added — Accessibility-first text expander
@@ -319,6 +328,7 @@ These are documented in [`docs/text-expander.md`](./docs/text-expander.md), surf
 - System tray menu: Open · Pause Capture · Clear History · Start with Windows · Quit.
 - pnpm + Cargo workspaces with shared [`core/`](./core) and [`win/`](./win) bundle shell.
 
+[0.3.1]: https://github.com/pepperonas/clipsnap/releases/tag/v0.3.1
 [0.3.0]: https://github.com/pepperonas/clipsnap/releases/tag/v0.3.0
 [0.2.12]: https://github.com/pepperonas/clipsnap/releases/tag/v0.2.12
 [0.2.11]: https://github.com/pepperonas/clipsnap/releases/tag/v0.2.11

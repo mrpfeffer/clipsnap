@@ -143,6 +143,34 @@ pub fn open_accessibility_settings() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Wipe stale TCC grants for ClipSnap (Accessibility + PostEvent), then
+/// fire the standard "would like to control" prompt with the *current*
+/// cdhash. Solves the common "toggle says on but ClipSnap still sees
+/// untrusted" state that occurs after every real source-change rebuild
+/// — the previous toggle was for an older cdhash, the new binary needs
+/// a fresh grant. Runs `tccutil reset` for our own bundle id, which
+/// doesn't require sudo.
+#[cfg(target_os = "macos")]
+pub fn force_reset_and_request_grant() -> anyhow::Result<bool> {
+    // 1) Wipe whatever stale entries exist. tccutil exits 0 even if
+    //    there's nothing to reset, so we don't need to check.
+    let _ = std::process::Command::new("tccutil")
+        .args(["reset", "Accessibility", "io.celox.clipsnap"])
+        .status();
+    let _ = std::process::Command::new("tccutil")
+        .args(["reset", "PostEvent", "io.celox.clipsnap"])
+        .status();
+
+    // 2) Fire the prompt. This re-adds ClipSnap to System Settings →
+    //    Accessibility with the current cdhash, ready to be toggled on.
+    Ok(request_accessibility_grant())
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn force_reset_and_request_grant() -> anyhow::Result<bool> {
+    Ok(accessibility_granted())
+}
+
 /// Settings keys.
 pub const KEY_HOTKEY: &str = "expander.hotkey";
 pub const KEY_ENABLED: &str = "expander.enabled";

@@ -151,6 +151,7 @@ pub fn run(context: tauri::Context<Wry>) {
             commands::get_accessibility_status,
             commands::request_accessibility_grant,
             commands::open_accessibility_settings,
+            commands::force_reset_and_request_grant,
             commands::quit_app,
             commands::relaunch_app,
         ])

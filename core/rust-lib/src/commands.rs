@@ -370,6 +370,15 @@ pub fn open_accessibility_settings() -> Result<(), String> {
     expander::open_accessibility_settings().map_err(map_err)
 }
 
+/// Wipe stale TCC entries for ClipSnap and fire the system Accessibility
+/// prompt with the current cdhash. Used when the user has the toggle
+/// "on" in System Settings but the running process still sees itself as
+/// untrusted (the typical "stale grant from a previous build" state).
+#[tauri::command]
+pub fn force_reset_and_request_grant() -> Result<bool, String> {
+    expander::force_reset_and_request_grant().map_err(map_err)
+}
+
 /// Quit the running app process. Intended for the Settings panel's
 /// "Quit ClipSnap" button after the user grants Accessibility — macOS
 /// caches `AXIsProcessTrusted()` per-process, so a freshly granted app

@@ -244,6 +244,15 @@ export function openAccessibilitySettings(): Promise<void> {
   return invoke("open_accessibility_settings");
 }
 
+/** Wipe stale TCC Accessibility/PostEvent entries for ClipSnap (via
+ *  `tccutil reset`) then fire the system "would like to control" prompt
+ *  with the *current* cdhash. Use this when the System Settings toggle
+ *  says "on" but ClipSnap still asks for permission on every action —
+ *  that means the toggle is for an older binary's cdhash. */
+export function forceResetAndRequestGrant(): Promise<boolean> {
+  return invoke("force_reset_and_request_grant");
+}
+
 /** Quit the app process. Used after granting Accessibility on macOS so
  *  the next launch picks up the fresh AXIsProcessTrusted state. */
 export function quitApp(): Promise<void> {

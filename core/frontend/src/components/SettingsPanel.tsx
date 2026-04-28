@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import {
   diagnoseExpandAtCursor,
+  forceResetAndRequestGrant,
   getAccessibilityStatus,
   getExpanderConfig,
   importBackup,
@@ -277,13 +278,32 @@ export function SettingsPanel({ onBackupImported }: Props = {}) {
               <button
                 onClick={async () => {
                   try {
+                    if (
+                      !window.confirm(
+                        "This wipes any stale Accessibility / PostEvent grants for ClipSnap and re-fires the macOS prompt with the current binary's signature. Use this when System Settings says ClipSnap is enabled but ClipSnap still asks for permission on every action. Continue?",
+                      )
+                    )
+                      return;
+                    await forceResetAndRequestGrant();
+                  } catch (e) {
+                    setStatus({ kind: "err", message: String(e) });
+                  }
+                }}
+                className="rounded border border-[var(--color-border)] px-2.5 py-1 text-[11px] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
+                title="Runs `tccutil reset` for io.celox.clipsnap and re-fires the system permission prompt. Fixes the 'toggle is on but expansion still prompts' state."
+              >
+                Force re-grant (clear stale)
+              </button>
+              <button
+                onClick={async () => {
+                  try {
                     await requestAccessibilityGrant();
                   } catch (e) {
                     setStatus({ kind: "err", message: String(e) });
                   }
                 }}
                 className="rounded border border-[var(--color-border)] px-2.5 py-1 text-[11px] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
-                title="Triggers macOS' built-in Accessibility prompt. May not show if macOS rate-limited it; in that case use the System Settings button."
+                title="Triggers macOS' built-in Accessibility prompt without resetting first. Use Force re-grant instead if the prompt fails to appear."
               >
                 Try system prompt
               </button>
