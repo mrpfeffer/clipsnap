@@ -301,6 +301,6 @@ See [`CHANGELOG.md`](./CHANGELOG.md) — every release is documented with what w
 
 ## License
 
-[MIT](./LICENSE) — © 2026 Martin Pfeffer | [celox.io](https://celox.io)
+[MIT](./LICENSE) — © 2026 Martin Pfeffer
 
 Built on weekends and evenings — by day a happy software engineer ❤️ at [Bayootec](https://bayoo.net).
