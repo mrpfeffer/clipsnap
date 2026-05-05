@@ -4,6 +4,35 @@ All notable changes to ClipSnap are documented here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] — 2026-05-05
+
+### Added — Plain-text paste, hex color preview, color picker
+
+- **Plain-text paste mode (default on).** Settings → Paste section gets a new toggle. When on, HTML and RTF clipboard entries are stripped to their plain-text preview at paste time — so copy-from-Word / browser / mail and paste-into-anything no longer leaks the source app's font / colour / hyperlink styling. The original formatted content is preserved in the history (preview pane still renders it; the type icon still shows HTML / RTF), only the *paste action* downgrades. Image / Files entries are unaffected. — *#feat(paste)*
+  - **Per-row override:** hold <kbd>Shift</kbd> while pressing <kbd>Enter</kbd> in the popup to paste *with* original formatting, regardless of the toggle. New IPC `paste_entry_formatted` bypasses the setting; `useKeyboardNav` forwards `event.shiftKey` to the activate handler.
+  - Backend: `paste.plain_text_only` setting key (default `true`); `paste_entry` reads it and routes Html / Rtf entries to `paste::paste_text(content_text)`. `paste_entry_formatted` always uses `paste::paste_entry` for original-content-type behaviour.
+- **Inline hex color preview** in the search input — Alfred-style. — *#feat(colors)*
+  - Type `#3366FF` (or `3366FF`, `#abc`, `#abcdef12`, …) and a color row appears as the top list item with a swatch + hex + RGB summary. Press <kbd>Enter</kbd> to paste the canonical `#RRGGBB` (uppercase) into the previously focused app.
+  - Heuristic: 3 / 4-digit forms require the `#` prefix (too ambiguous with search otherwise — `abc`, `f00d`, …); 6 / 8-digit forms accept either form.
+  - Preview pane shows a full 128 px swatch with the hex overlaid (foreground auto-picked black/white via WCAG luminance for readability), plus copy-to-clipboard buttons for hex / `rgb(…)` / `hsl(…)` strings.
+  - Pure frontend (`core/frontend/src/lib/colors.ts`); 24 vitest cases covering valid / invalid / canonicalisation / RGB-HSL conversion / readable-foreground.
+- **OS-native color picker** — new "Color picker" button in the History tab's toolbar. Opens an `<input type="color">` which Tauri renders via the OS-native picker (NSColorPanel on macOS, Win32 ColorDialog on Windows, GTK ColorChooser on Linux). The chosen hex (uppercase) is written to the system clipboard via the Web Clipboard API; the watcher captures it as a fresh history entry within the next event tick. — *#feat(colors)*
+
+### Changed
+
+- `App.tsx` activate handler: signature changes to `activate(i, shiftKey)`. Color-row activation pastes the canonical hex via the existing `paste_text` command. Calc-row activation unchanged.
+- `useKeyboardNav.onEnter` callback signature is now `(shiftKey: boolean) => void`.
+- `HistoryItem` and `PreviewPanel` learn a fourth row kind (`color`) alongside clip / snippet / calc.
+- `ListEntry` discriminated union gains `{ kind: "color"; data: ColorEntryView }`.
+
+### Tests
+
+`pnpm test`: **53 → 77 frontend** (+24 colors tests). `cargo test --workspace`: 84 unchanged (paste-plain-text logic exercises through existing paste tests; the wiring is straightforward enough that integration testing is overkill here).
+
+### Why 0.4.0 (not 0.3.2)
+
+Plain-text-paste-by-default is a **behaviour change**: clipboard entries that *used* to paste with formatting now arrive as plain text, by default, without the user opting in. That's a semver-meaningful flip. Two new user-facing features (hex preview, color picker) compound it. Bumping minor signals the change.
+
 ## [0.3.1] — 2026-04-29
 
 ### Fixed
@@ -328,6 +357,7 @@ These are documented in [`docs/text-expander.md`](./docs/text-expander.md), surf
 - System tray menu: Open · Pause Capture · Clear History · Start with Windows · Quit.
 - pnpm + Cargo workspaces with shared [`core/`](./core) and [`win/`](./win) bundle shell.
 
+[0.4.0]: https://github.com/pepperonas/clipsnap/releases/tag/v0.4.0
 [0.3.1]: https://github.com/pepperonas/clipsnap/releases/tag/v0.3.1
 [0.3.0]: https://github.com/pepperonas/clipsnap/releases/tag/v0.3.0
 [0.2.12]: https://github.com/pepperonas/clipsnap/releases/tag/v0.2.12

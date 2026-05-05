@@ -14,12 +14,14 @@ import { useKeyboardNav } from "./hooks/useKeyboardNav";
 import { useNotes } from "./hooks/useNotes";
 import { useSnippets } from "./hooks/useSnippets";
 import { tryEvaluate } from "./lib/calc";
+import { tryParseColor } from "./lib/colors";
 import {
   clearHistory,
   deleteEntry,
   findSnippets,
   hidePopup,
   pasteEntry,
+  pasteEntryFormatted,
   pasteSnippet,
   pasteText,
   saveClipAsNote,
@@ -52,10 +54,16 @@ function App() {
   // least one operator/function/constant, surface the result as the top
   // list item (Alfred-style).
   const calcResult = useMemo(() => tryEvaluate(query), [query]);
+  // Inline hex-color preview: same idea — when the query parses as a
+  // hex color (#RGB, #RGBA, RRGGBB, RRGGBBAA, …) prepend a color row.
+  // Calc and color are mutually exclusive in practice (a math expression
+  // can't also be a valid hex literal because of operator characters).
+  const colorResult = useMemo(() => tryParseColor(query), [query]);
 
-  // Combine: calc result first, then snippet matches, then history clips.
+  // Combine: calc / color first, then snippet matches, then history clips.
   const combined: ListEntry[] = [
     ...(calcResult ? [{ kind: "calc", data: calcResult } as ListEntry] : []),
+    ...(colorResult ? [{ kind: "color", data: colorResult } as ListEntry] : []),
     ...matchingSnippets.map((s): ListEntry => ({ kind: "snippet", data: s })),
     ...filteredClips.map((c): ListEntry => ({ kind: "clip", data: c })),
   ];
@@ -116,7 +124,7 @@ function App() {
     return () => unlisten?.();
   }, [refreshNotes]);
 
-  const activate = async (i: number) => {
+  const activate = async (i: number, shiftKey = false) => {
     const target = combined[i];
     if (!target) return;
     try {
@@ -124,8 +132,16 @@ function App() {
         await pasteSnippet(target.data.id);
       } else if (target.kind === "calc") {
         await pasteText(target.data.display);
+      } else if (target.kind === "color") {
+        await pasteText(target.data.pasteValue);
       } else {
-        await pasteEntry(target.data.id);
+        // Clipboard entry. Shift+Enter overrides the plain-text setting
+        // and forces the original content type (HTML/RTF formatted paste).
+        if (shiftKey) {
+          await pasteEntryFormatted(target.data.id);
+        } else {
+          await pasteEntry(target.data.id);
+        }
       }
     } catch (e) {
       console.error("paste failed", e);
@@ -167,7 +183,7 @@ function App() {
     length: combined.length,
     selected,
     setSelected,
-    onEnter: () => void activate(selected),
+    onEnter: (shiftKey) => void activate(selected, shiftKey),
     onEscape: () => {
       void hidePopup();
     },

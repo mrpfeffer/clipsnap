@@ -1,7 +1,8 @@
 import { useMemo } from "react";
-import { Calculator, Zap } from "lucide-react";
+import { Calculator, Copy, Palette, Zap } from "lucide-react";
 import type { ListEntry } from "../lib/types";
 import { formatBytes } from "../lib/format";
+import { readableForeground } from "../lib/colors";
 
 interface Props {
   entry: ListEntry | null;
@@ -21,6 +22,50 @@ export function PreviewPanel({ entry }: Props) {
     return (
       <div className="flex h-full items-center justify-center text-[13px] text-[var(--color-muted)]">
         Select an entry
+      </div>
+    );
+  }
+
+  // ── Color preview ──────────────────────────────────────────────────────────
+  if (entry.kind === "color") {
+    const c = entry.data;
+    const fg = readableForeground(c.r, c.g, c.b);
+    const copy = (text: string) => {
+      void navigator.clipboard.writeText(text).catch(() => {});
+    };
+    return (
+      <div className="flex h-full flex-col p-4">
+        <div className="mb-3 flex items-center gap-2 text-[11px] uppercase tracking-wide text-[var(--color-muted)]">
+          <Palette size={12} className="text-[var(--color-accent)]" />
+          <span>color</span>
+          <span>·</span>
+          <span>press Enter to paste hex</span>
+        </div>
+        <div
+          className="flex h-32 items-center justify-center rounded-lg border border-[var(--color-border)] font-[var(--font-mono)] text-[24px] font-semibold tracking-wider"
+          style={{ backgroundColor: c.hex, color: fg }}
+        >
+          {c.hex}
+        </div>
+        <div className="mt-3 grid grid-cols-[80px_1fr_auto] items-center gap-x-3 gap-y-1.5 text-[12px]">
+          <span className="text-[var(--color-muted)]">Hex</span>
+          <code className="rounded bg-[var(--color-surface)] px-1 py-0.5 font-[var(--font-mono)]">
+            {c.hex}
+          </code>
+          <CopyButton onClick={() => copy(c.hex)} />
+
+          <span className="text-[var(--color-muted)]">RGB</span>
+          <code className="rounded bg-[var(--color-surface)] px-1 py-0.5 font-[var(--font-mono)]">
+            {c.rgbString}
+          </code>
+          <CopyButton onClick={() => copy(c.rgbString)} />
+
+          <span className="text-[var(--color-muted)]">HSL</span>
+          <code className="rounded bg-[var(--color-surface)] px-1 py-0.5 font-[var(--font-mono)]">
+            {c.hslString}
+          </code>
+          <CopyButton onClick={() => copy(c.hslString)} />
+        </div>
       </div>
     );
   }
@@ -150,5 +195,17 @@ export function PreviewPanel({ entry }: Props) {
         {clip.content_data}
       </pre>
     </div>
+  );
+}
+
+function CopyButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      title="Copy"
+      className="rounded p-1 text-[var(--color-muted)] hover:bg-[var(--color-surface)] hover:text-[var(--color-fg)]"
+    >
+      <Copy size={11} />
+    </button>
   );
 }

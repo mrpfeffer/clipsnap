@@ -48,8 +48,71 @@ pub fn search_history(
     Ok(filtered)
 }
 
+/// Settings key controlling whether HTML / RTF clipboard entries get
+/// downgraded to plain text on paste. Defaults to `true` — most users
+/// want to drop the source app's styling when pasting elsewhere.
+const KEY_PLAIN_TEXT_ONLY: &str = "paste.plain_text_only";
+
+/// Default behaviour: respects the `paste.plain_text_only` setting. For
+/// HTML / RTF entries with the setting on, pastes the plain-text
+/// preview (`content_text`) instead of the formatted payload.
+/// Image / Files entries are unaffected — they're always pasted as-is.
 #[tauri::command]
 pub fn paste_entry(
+    app: AppHandle,
+    db: State<'_, DbHandle>,
+    id: i64,
+) -> Result<(), String> {
+    let entry = db::get(&db, id)
+        .map_err(map_err)?
+        .ok_or_else(|| "entry not found".to_string())?;
+
+    let plain_only = settings::get_bool(&db, KEY_PLAIN_TEXT_ONLY, true).unwrap_or(true);
+
+    hotkey::hide_popup(&app);
+    if plain_only
+        && matches!(
+            entry.content_type,
+            crate::models::ContentType::Html | crate::models::ContentType::Rtf
+        )
+    {
+        // Use the plain-text preview captured at clipboard-watch time.
+        // For Text entries content_text == content_data, so this branch
+        // intentionally does not fire for them.
+        paste::paste_text(&entry.content_text).map_err(map_err)?;
+    } else {
+        paste::paste_entry(&entry).map_err(map_err)?;
+    }
+    db::touch(&db, id).map_err(map_err)?;
+    Ok(())
+}
+
+/// Read the current value of `paste.plain_text_only` (default `true`).
+#[tauri::command]
+pub fn get_paste_plain_text_only(db: State<'_, DbHandle>) -> Result<bool, String> {
+    settings::get_bool(&db, KEY_PLAIN_TEXT_ONLY, true).map_err(map_err)
+}
+
+/// Persist a new value for `paste.plain_text_only`.
+#[tauri::command]
+pub fn set_paste_plain_text_only(
+    db: State<'_, DbHandle>,
+    value: bool,
+) -> Result<(), String> {
+    settings::set(
+        &db,
+        KEY_PLAIN_TEXT_ONLY,
+        if value { "true" } else { "false" },
+    )
+    .map_err(map_err)
+}
+
+/// Force-format paste — bypasses the `paste.plain_text_only` setting and
+/// always uses the entry's original content type. Wired to Shift+Enter
+/// in the popup as a one-shot override for users who normally paste as
+/// plain text but want to keep formatting *this* time.
+#[tauri::command]
+pub fn paste_entry_formatted(
     app: AppHandle,
     db: State<'_, DbHandle>,
     id: i64,

@@ -4,6 +4,7 @@ import {
   AlertTriangle,
   Archive,
   CheckCircle2,
+  ClipboardType,
   Download,
   Keyboard,
   PlayCircle,
@@ -16,6 +17,7 @@ import {
   forceResetAndRequestGrant,
   getAccessibilityStatus,
   getExpanderConfig,
+  getPastePlainTextOnly,
   importBackup,
   openAccessibilitySettings,
   quitApp,
@@ -23,6 +25,7 @@ import {
   requestAccessibilityGrant,
   saveBackupToFile,
   setExpanderConfig,
+  setPastePlainTextOnly,
   setSuppressHide,
   type DiagnoseResult,
   type ExpanderConfig,
@@ -62,6 +65,38 @@ export function SettingsPanel({ onBackupImported }: Props = {}) {
     | null
   >(null);
   const pollRef = useRef<number | null>(null);
+
+  // ── Paste section state ─────────────────────────────────────────────────
+  const [plainTextOnly, setPlainTextOnly] = useState<boolean | null>(null);
+  const [plainTextSaving, setPlainTextSaving] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    getPastePlainTextOnly()
+      .then((v) => {
+        if (alive) setPlainTextOnly(v);
+      })
+      .catch(() => {
+        if (alive) setPlainTextOnly(true);
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const togglePlainText = async (next: boolean) => {
+    setPlainTextOnly(next); // optimistic
+    setPlainTextSaving(true);
+    try {
+      await setPastePlainTextOnly(next);
+    } catch (e) {
+      // Revert on failure.
+      setPlainTextOnly(!next);
+      setStatus({ kind: "err", message: String(e) });
+    } finally {
+      setPlainTextSaving(false);
+    }
+  };
 
   // ── Backup section state ────────────────────────────────────────────────
   const [includeHistory, setIncludeHistory] = useState(true);
@@ -573,6 +608,48 @@ export function SettingsPanel({ onBackupImported }: Props = {}) {
             </ul>
           </details>
         </Section>
+
+        {/* Paste behaviour section */}
+        <div className="mt-6">
+          <Section
+            icon={<ClipboardType size={16} className="text-[var(--color-accent)]" />}
+            title="Paste"
+            subtitle="Control how clipboard entries land in the destination app."
+          >
+            <Row label="Plain text only">
+              <label className="flex cursor-pointer items-center gap-2 text-[12px]">
+                <input
+                  type="checkbox"
+                  checked={plainTextOnly ?? true}
+                  disabled={plainTextOnly === null || plainTextSaving}
+                  onChange={(e) => void togglePlainText(e.target.checked)}
+                  className="accent-[var(--color-accent)]"
+                />
+                <span className="text-[var(--color-muted)]">
+                  {plainTextOnly === null
+                    ? "Loading…"
+                    : plainTextOnly
+                      ? "HTML / RTF entries are stripped to plain text on paste"
+                      : "Original formatting is preserved when pasting HTML / RTF"}
+                </span>
+              </label>
+            </Row>
+
+            <div className="mt-1 rounded border border-dashed border-[var(--color-border)] bg-[var(--color-surface)] p-2.5 text-[11px] text-[var(--color-muted)]">
+              <span className="text-[var(--color-fg)]">Tip — one-shot override:</span>{" "}
+              hold{" "}
+              <kbd className="rounded border border-[var(--color-border)] bg-[var(--color-bg)] px-1 font-[var(--font-mono)]">
+                Shift
+              </kbd>{" "}
+              while pressing{" "}
+              <kbd className="rounded border border-[var(--color-border)] bg-[var(--color-bg)] px-1 font-[var(--font-mono)]">
+                Enter
+              </kbd>{" "}
+              in the popup to paste with original formatting{" "}
+              <em>this once</em>, regardless of the toggle above.
+            </div>
+          </Section>
+        </div>
 
         {/* Backup & restore section */}
         <div className="mt-6">

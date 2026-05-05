@@ -11,8 +11,25 @@ export function searchHistory(query: string, limit = 500): Promise<ClipEntry[]> 
   return invoke("search_history", { query, limit });
 }
 
+/** Paste a clipboard entry. Honours the `paste.plain_text_only` setting:
+ *  HTML / RTF entries are downgraded to their plain-text preview when
+ *  the toggle is on. Image / Files entries paste as-is. */
 export function pasteEntry(id: number): Promise<void> {
   return invoke("paste_entry", { id });
+}
+
+/** Paste a clipboard entry preserving its original content type. Bypasses
+ *  the plain-text setting — used by Shift+Enter as a one-shot override. */
+export function pasteEntryFormatted(id: number): Promise<void> {
+  return invoke("paste_entry_formatted", { id });
+}
+
+export function getPastePlainTextOnly(): Promise<boolean> {
+  return invoke("get_paste_plain_text_only");
+}
+
+export function setPastePlainTextOnly(value: boolean): Promise<void> {
+  return invoke("set_paste_plain_text_only", { value });
 }
 
 export function deleteEntry(id: number): Promise<void> {

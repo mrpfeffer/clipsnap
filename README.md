@@ -5,7 +5,7 @@
 
   **Fast, lightweight clipboard history manager + text expander for Windows 11**
 
-  [![Version](https://img.shields.io/badge/version-0.3.1-blue?style=flat-square)](https://github.com/pepperonas/clipsnap/releases)
+  [![Version](https://img.shields.io/badge/version-0.4.0-blue?style=flat-square)](https://github.com/pepperonas/clipsnap/releases)
   [![License: MIT](https://img.shields.io/badge/license-MIT-green?style=flat-square)](./LICENSE)
   [![Platform](https://img.shields.io/badge/platform-Windows%2011-0078D4?style=flat-square&logo=windows11&logoColor=white)](./win)
   [![Tauri 2](https://img.shields.io/badge/Tauri-2-FFC131?style=flat-square&logo=tauri&logoColor=white)](https://tauri.app)
@@ -77,6 +77,16 @@ Type a math expression in the search field and the result appears as the top lis
 - **Functions:** `sqrt`, `cbrt`, `abs`, `sign`, `floor`, `ceil`, `round`, `ln`, `log` (base 10), `log2`, `exp`, `sin`/`cos`/`tan` (radians), `asin`/`acos`/`atan`/`atan2`, `sinh`/`cosh`/`tanh`, `min`, `max`, `pow`, `mod`.
 - **Gating:** plain numbers (`42`) and plain text don't trigger calc mode — the input must contain at least one operator, function, or constant. Prefix with `=` to force evaluation of a single literal (`=pi`).
 - **Implementation:** safe recursive-descent parser in [`core/frontend/src/lib/calc.ts`](./core/frontend/src/lib/calc.ts) — no `eval`. 27 unit tests in [`calc.test.ts`](./core/frontend/src/lib/calc.test.ts).
+
+### Hex color preview + picker (v0.4.0)
+Type `#3366FF` (or `3366ff`, `#abc`, `#abcdef12`, …) in the search field and a color row appears at the top with a swatch + hex + RGB. Press Enter to paste the canonical `#RRGGBB` uppercase. The History tab's toolbar also has a **Color picker** button that opens the OS-native picker (NSColorPanel / Win32 ColorDialog / GTK ColorChooser) and writes the chosen hex to the clipboard.
+
+- 3/4-digit forms require the `#` prefix; 6/8-digit forms accept either form (so `abc` stays a search query but `abcdef` is a color).
+- Preview pane shows a 128 px swatch with the hex overlaid (foreground auto-picked black/white via WCAG luminance) plus copy buttons for hex / RGB / HSL strings.
+- Pure frontend ([`core/frontend/src/lib/colors.ts`](./core/frontend/src/lib/colors.ts)). 24 unit tests. Full reference: [`docs/colors.md`](./docs/colors.md).
+
+### Plain-text paste (default on, v0.4.0)
+HTML / RTF clipboard entries are stripped to their plain-text preview at paste time, so copy-from-Word / browser / mail and paste-into-anything no longer leaks the source app's styling. Toggle in **Settings → Paste**. Hold <kbd>Shift</kbd> + <kbd>Enter</kbd> in the popup to override and paste with original formatting just for that one entry.
 
 ### Notes (v0.2.6)
 Notes are **persistent, categorized clipboard items** — they live in their own SQLite table and are **not** affected by the 1 000-entry pruning of the clipboard history.
@@ -159,6 +169,7 @@ clipsnap/
 │   ├── notes.md             # Notes feature — categories, edit semantics, IPC surface
 │   ├── backup.md            # Full-app export/import — schema, merge semantics, jq recipes
 │   ├── text-expander.md     # System-wide expander — workflow, hotkey format, per-OS caveats
+│   ├── colors.md            # Inline hex preview + OS-native color picker
 │   ├── RELEASING.md         # Release procedure
 │   └── examples/
 │       └── snippets/        # 5 themed JSON examples + their own README
@@ -232,7 +243,7 @@ Full feature reference: [`docs/notes.md`](./docs/notes.md). Backup file schema a
 ### Tests
 
 ```bash
-pnpm test               # frontend unit tests (vitest + happy-dom) — 53 tests
+pnpm test               # frontend unit tests (vitest + happy-dom) — 77 tests
 cargo test --workspace  # Rust unit tests — 84 tests (db, snippets, notes, backup, settings, expander, text_field, hotkey parser, clipboard_watcher, models)
 ```
 

@@ -1,5 +1,5 @@
 import { memo } from "react";
-import { Bookmark, Calculator, FileCode2, FileText, Files, Image, Trash2, Type, Zap } from "lucide-react";
+import { Bookmark, Calculator, FileCode2, FileText, Files, Image, Palette, Trash2, Type, Zap } from "lucide-react";
 import type { ListEntry } from "../lib/types";
 import { relativeTime, truncateOneLine } from "../lib/format";
 
@@ -20,6 +20,7 @@ function TypeIcon({ entry }: { entry: ListEntry }) {
   const size = 14;
   if (entry.kind === "snippet") return <Zap size={size} className={cls} />;
   if (entry.kind === "calc") return <Calculator size={size} className={cls} />;
+  if (entry.kind === "color") return <Palette size={size} className={cls} />;
   switch (entry.data.content_type) {
     case "text":  return <Type size={size} className={cls} />;
     case "image": return <Image size={size} className={cls} />;
@@ -40,11 +41,12 @@ export const HistoryItem = memo(function HistoryItem({
 }: Props) {
   const isSnippet = entry.kind === "snippet";
   const isCalc = entry.kind === "calc";
+  const isColor = entry.kind === "color";
 
   const label =
     isSnippet
       ? `${entry.data.abbreviation}  ${entry.data.title || entry.data.body.split("\n")[0]}`
-      : isCalc
+      : isCalc || isColor
         ? ""
         : truncateOneLine(entry.data.content_text || "(empty)", 80);
 
@@ -69,6 +71,17 @@ export const HistoryItem = memo(function HistoryItem({
       }
     >
       calc
+    </span>
+  ) : isColor ? (
+    <span
+      className={
+        "shrink-0 rounded px-1 py-0.5 text-[10px] font-medium uppercase tracking-wide " +
+        (selected
+          ? "bg-white/20 text-white/80"
+          : "bg-[var(--color-accent)]/15 text-[var(--color-accent)]")
+      }
+    >
+      color
     </span>
   ) : (
     <span
@@ -120,6 +133,25 @@ export const HistoryItem = memo(function HistoryItem({
               {truncateOneLine(entry.data.expression, 40)} ={" "}
             </span>
             <span className="font-semibold">{entry.data.display}</span>
+          </span>
+        ) : isColor && entry.kind === "color" ? (
+          <span className="flex items-center gap-2">
+            <span
+              className="inline-block h-4 w-4 shrink-0 rounded border border-[var(--color-border)]"
+              style={{ backgroundColor: entry.data.hex }}
+              aria-hidden
+            />
+            <span className="font-[var(--font-mono)] font-semibold">
+              {entry.data.hex}
+            </span>
+            <span
+              className={
+                "truncate text-[11px] " +
+                (selected ? "text-white/70" : "text-[var(--color-muted)]")
+              }
+            >
+              {entry.data.rgbString}
+            </span>
           </span>
         ) : (
           label

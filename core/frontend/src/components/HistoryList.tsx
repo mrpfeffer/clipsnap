@@ -1,6 +1,6 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useEffect, useMemo, useRef } from "react";
-import { Trash2 } from "lucide-react";
+import { Palette, Trash2 } from "lucide-react";
 import { HistoryItem } from "./HistoryItem";
 import type { ListEntry } from "../lib/types";
 
@@ -29,6 +29,7 @@ export function HistoryList({
   onClearAll,
 }: Props) {
   const parentRef = useRef<HTMLDivElement>(null);
+  const colorInputRef = useRef<HTMLInputElement>(null);
 
   const virtualizer = useVirtualizer({
     count: entries.length,
@@ -52,29 +53,61 @@ export function HistoryList({
 
   return (
     <div className="flex h-full flex-col">
-      {onClearAll && clipCount > 0 && (
-        <div className="flex shrink-0 items-center justify-between border-b border-[var(--color-border)] px-3 py-1 text-[11px] text-[var(--color-muted)]">
-          <span>{clipCount} clip{clipCount === 1 ? "" : "s"}</span>
-          <button
-            onClick={() => {
-              if (
-                window.confirm(
-                  `Delete all ${clipCount} clipboard ${
-                    clipCount === 1 ? "entry" : "entries"
-                  }? This cannot be undone.`,
-                )
-              ) {
-                onClearAll();
-              }
-            }}
-            className="flex items-center gap-1 rounded px-2 py-0.5 hover:bg-[var(--color-surface)] hover:text-red-400"
-            title="Delete all clipboard history"
-          >
-            <Trash2 size={11} />
-            Clear all
-          </button>
+      {/* Toolbar always rendered — the color picker is always available;
+          the Clear All / count controls are conditional within. */}
+      <div className="flex shrink-0 items-center justify-between border-b border-[var(--color-border)] px-3 py-1 text-[11px] text-[var(--color-muted)]">
+          <span>
+            {clipCount} clip{clipCount === 1 ? "" : "s"}
+          </span>
+          <div className="flex items-center gap-1">
+            {/* Hidden HTML5 color input — clicking the visible button
+                programmatically opens the OS-native color picker
+                (NSColorPanel on macOS, Win32 ColorDialog on Windows,
+                GTK ColorChooser on Linux). The result is written to
+                the OS clipboard so the watcher captures it as a fresh
+                clip in this list. */}
+            <input
+              ref={colorInputRef}
+              type="color"
+              defaultValue="#3366FF"
+              onChange={(e) => {
+                const hex = e.target.value.toUpperCase();
+                void navigator.clipboard.writeText(hex).catch(() => {});
+              }}
+              className="absolute -z-10 h-0 w-0 opacity-0"
+              aria-hidden
+              tabIndex={-1}
+            />
+            <button
+              onClick={() => colorInputRef.current?.click()}
+              className="flex items-center gap-1 rounded px-2 py-0.5 hover:bg-[var(--color-surface)] hover:text-[var(--color-accent)]"
+              title="Open the system color picker; the chosen hex is copied to your clipboard"
+            >
+              <Palette size={11} />
+              Color picker
+            </button>
+            {onClearAll && clipCount > 0 && (
+              <button
+                onClick={() => {
+                  if (
+                    window.confirm(
+                      `Delete all ${clipCount} clipboard ${
+                        clipCount === 1 ? "entry" : "entries"
+                      }? This cannot be undone.`,
+                    )
+                  ) {
+                    onClearAll();
+                  }
+                }}
+                className="flex items-center gap-1 rounded px-2 py-0.5 hover:bg-[var(--color-surface)] hover:text-red-400"
+                title="Delete all clipboard history"
+              >
+                <Trash2 size={11} />
+                Clear all
+              </button>
+            )}
+          </div>
         </div>
-      )}
 
       {entries.length === 0 ? (
         <div className="flex flex-1 items-center justify-center text-[13px] text-[var(--color-muted)]">
@@ -96,7 +129,9 @@ export function HistoryList({
                   ? `s-${entry.data.id}`
                   : entry.kind === "calc"
                     ? `calc-${entry.data.expression}`
-                    : `c-${entry.data.id}`;
+                    : entry.kind === "color"
+                      ? `color-${entry.data.hex}`
+                      : `c-${entry.data.id}`;
               return (
                 <HistoryItem
                   key={key}

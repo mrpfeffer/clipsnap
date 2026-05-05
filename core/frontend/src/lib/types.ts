@@ -30,6 +30,20 @@ export interface CalcEntry {
   display: string;
 }
 
+/** A hex-color preview row, surfaced when the search query parses as a
+ *  hex color. Activating pastes `pasteValue` (canonical `#RRGGBB`). */
+export interface ColorEntryView {
+  hex: string;
+  pasteValue: string;
+  r: number;
+  g: number;
+  b: number;
+  a: number;
+  hsl: { h: number; s: number; l: number };
+  rgbString: string;
+  hslString: string;
+}
+
 export interface Note {
   id: number;
   content_type: ContentType;
@@ -54,4 +68,5 @@ export interface BackupImportResult {
 export type ListEntry =
   | { kind: "clip"; data: ClipEntry }
   | { kind: "snippet"; data: Snippet }
-  | { kind: "calc"; data: CalcEntry };
+  | { kind: "calc"; data: CalcEntry }
+  | { kind: "color"; data: ColorEntryView };

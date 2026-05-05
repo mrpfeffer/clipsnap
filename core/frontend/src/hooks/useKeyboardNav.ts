@@ -4,7 +4,10 @@ interface Args {
   length: number;
   selected: number;
   setSelected: (i: number) => void;
-  onEnter: () => void;
+  /** Called on Enter or Shift+Enter. The boolean argument tells the
+   *  caller whether Shift was held — the activate logic uses that to
+   *  pick `paste_entry_formatted` over `paste_entry`. */
+  onEnter: (shiftKey: boolean) => void;
   onEscape: () => void;
 }
 
@@ -27,7 +30,7 @@ export function useKeyboardNav({
         setSelected(Math.max(selected - 1, 0));
       } else if (e.key === "Enter") {
         e.preventDefault();
-        if (length > 0) onEnter();
+        if (length > 0) onEnter(e.shiftKey);
       } else if (e.key === "Escape") {
         e.preventDefault();
         onEscape();
