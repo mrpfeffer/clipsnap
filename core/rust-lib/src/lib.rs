@@ -133,6 +133,7 @@ pub fn run(context: tauri::Context<Wry>) {
             commands::upsert_snippet,
             commands::delete_snippet,
             commands::paste_snippet,
+            commands::paste_note_formatted,
             commands::import_snippets,
             commands::import_snippets_from_file,
             commands::set_suppress_hide,

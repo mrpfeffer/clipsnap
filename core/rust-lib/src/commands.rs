@@ -311,11 +311,42 @@ pub fn clear_notes(db: State<'_, DbHandle>) -> Result<(), String> {
     notes::clear_all(&db).map_err(map_err)
 }
 
-/// Paste a note: hide popup, write payload to clipboard (preserving its
-/// original content type — image/html/rtf/etc.), then send the paste
-/// shortcut.
+/// Paste a note. Honours the `paste.plain_text_only` setting in the same
+/// way `paste_entry` does: HTML / RTF notes get downgraded to their
+/// plain-text preview when the toggle is on. Image / Files notes paste
+/// as-is regardless.
 #[tauri::command]
 pub fn paste_note(
+    app: AppHandle,
+    db: State<'_, DbHandle>,
+    id: i64,
+) -> Result<(), String> {
+    let note = notes::get(&db, id)
+        .map_err(map_err)?
+        .ok_or_else(|| "note not found".to_string())?;
+
+    let plain_only = settings::get_bool(&db, KEY_PLAIN_TEXT_ONLY, true).unwrap_or(true);
+
+    hotkey::hide_popup(&app);
+    if plain_only
+        && matches!(
+            note.content_type,
+            crate::models::ContentType::Html | crate::models::ContentType::Rtf
+        )
+    {
+        paste::paste_text(&note.content_text).map_err(map_err)
+    } else {
+        paste::paste_payload(note.content_type, &note.content_data, &note.content_text)
+            .map_err(map_err)
+    }
+}
+
+/// Force-format paste for notes — bypasses the plain-text setting and
+/// uses the note's original content type. Mirrors `paste_entry_formatted`
+/// for symmetry; expose to the frontend if a Shift+click override on
+/// the Notes-tab Paste button is wanted in a future iteration.
+#[tauri::command]
+pub fn paste_note_formatted(
     app: AppHandle,
     db: State<'_, DbHandle>,
     id: i64,

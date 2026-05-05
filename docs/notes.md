@@ -56,9 +56,9 @@ When you save a clip as a note, ClipSnap copies its `content_type` verbatim. The
 | Content type | Body editor                            | Paste behaviour                                |
 |--------------|----------------------------------------|------------------------------------------------|
 | `text`       | Plain `<textarea>`, fully editable     | Pasted as plain text                           |
-| `html`       | `<textarea>` with raw HTML markup, editable — power-user feature | Pasted as **HTML** (apps that understand it use the formatting; others fall back to plain text) |
-| `rtf`        | `<textarea>` with raw RTF markup, editable — power-user feature | Pasted as **rich text**                        |
-| `image`      | Inline preview (`<img>`), **read-only** | Pasted as image                                |
+| `html`       | `<textarea>` with raw HTML markup, editable — power-user feature | **Settings → Paste → Plain text only = on** (default since v0.4.0) → pasted as the plain-text preview. Toggle off → pasted as HTML (apps that understand it use the formatting; others fall back to plain text). |
+| `rtf`        | `<textarea>` with raw RTF markup, editable — power-user feature | Same as `html` — plain-text preview by default, original RTF when the toggle is off. |
+| `image`      | Inline preview (`<img>`), **read-only** | Pasted as image (the plain-text setting only affects html/rtf, not images/files) |
 | `files`      | List of file paths, **read-only**       | Pasted as newline-joined paths (clipboard-rs cannot set real file lists from Rust on every OS) |
 
 Title and Category are **always editable**, regardless of content type.
@@ -124,7 +124,8 @@ Database file location:
 | `update_note`                  | `id, title, body, category`       | `void`          |
 | `delete_note`                  | `id`                              | `void`          |
 | `clear_notes`                  | —                                 | `void`          |
-| `paste_note`                   | `id`                              | `void`          |
+| `paste_note`                   | `id`                              | `void` — honours `paste.plain_text_only` |
+| `paste_note_formatted`         | `id`                              | `void` — bypasses the setting; always uses original content type |
 
 `Note` shape:
 

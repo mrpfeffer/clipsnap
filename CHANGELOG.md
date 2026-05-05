@@ -4,6 +4,17 @@ All notable changes to ClipSnap are documented here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] — 2026-05-05
+
+### Changed
+
+- **`paste_note` now respects `paste.plain_text_only`.** v0.4.0 added the plain-text-paste toggle for clipboard history, but notes (a separate paste path via `paste_note`) kept their old behaviour — HTML / RTF notes always pasted with formatting. The user's original ask was "always plain text in all OSes" which implicitly covers notes too. Now: HTML / RTF notes get downgraded to their plain-text preview when the toggle is on; image / files notes remain unaffected. — *#fix(paste)*
+- New `paste_note_formatted` IPC command mirrors `paste_entry_formatted` — bypasses the setting and uses the note's original content type. Wires up symmetrically; the NotesPanel UI doesn't surface a Shift+click override yet but the IPC is ready when we add one.
+
+### Docs
+
+- `docs/notes.md` paste-behaviour table updated to call out which content types respect the plain-text-only toggle and which are unaffected.
+
 ## [0.4.0] — 2026-05-05
 
 ### Added — Plain-text paste, hex color preview, color picker
@@ -357,6 +368,7 @@ These are documented in [`docs/text-expander.md`](./docs/text-expander.md), surf
 - System tray menu: Open · Pause Capture · Clear History · Start with Windows · Quit.
 - pnpm + Cargo workspaces with shared [`core/`](./core) and [`win/`](./win) bundle shell.
 
+[0.4.1]: https://github.com/pepperonas/clipsnap/releases/tag/v0.4.1
 [0.4.0]: https://github.com/pepperonas/clipsnap/releases/tag/v0.4.0
 [0.3.1]: https://github.com/pepperonas/clipsnap/releases/tag/v0.3.1
 [0.3.0]: https://github.com/pepperonas/clipsnap/releases/tag/v0.3.0
