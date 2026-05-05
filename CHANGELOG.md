@@ -4,6 +4,15 @@ All notable changes to ClipSnap are documented here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.2] — 2026-05-05
+
+### Fixed
+
+- **No more duplicate history entries from plain-text paste.** v0.4.0's plain-text-paste downgrade for HTML / RTF clips was leaking back into the watcher: ClipSnap wrote the plain-text version of an HTML clip to the OS clipboard → the clipboard watcher saw the change → recorded a *new* Text-type entry `just now`, sitting next to the original HTML clip from earlier. Hash-based dedup didn't catch it because `hash(Html, "<p>foo</p>") ≠ hash(Text, "foo")`. — *#fix(watcher)*
+  - **Fix:** `WatcherState` gets a one-shot `self_written: Mutex<Option<String>>` fuse holding the SHA-256 of the most recent payload we wrote ourselves. The watcher checks this hash before storing and consumes-and-skips any matching event. Every paste IPC (`paste_entry`, `paste_entry_formatted`, `paste_text`, `paste_snippet`, `paste_note`, `paste_note_formatted`) calls `watcher.mark_self_write(content_type, payload)` immediately before triggering the OS clipboard write. Net effect: pasting from history never creates a duplicate entry, regardless of the plain-text setting.
+- **Macros prompt no longer fires as an unwanted side effect.** When `expand_at_cursor` (hotkey trigger) or `diagnose_at_cursor` (Test button) call `AXUIElementCopyAttributeValue` on the system-wide element while ClipSnap is **untrusted** (typical post-rebuild stale-cdhash state), macOS triggers the standard "would like to control this computer" prompt as a side effect — even when we just want to silently fall back to the clipboard path. — *#fix(macos)*
+  - **Fix:** both functions now check `accessibility_granted()` *before* calling any AX function. When `false`, they go straight to the clipboard fallback (or return an empty diagnose result), and the macOS prompt isn't triggered as a no-op cost. The Settings panel's amber banner + **Force re-grant** button remain the right place to surface the underlying permission issue.
+
 ## [0.4.1] — 2026-05-05
 
 ### Changed
@@ -368,6 +377,7 @@ These are documented in [`docs/text-expander.md`](./docs/text-expander.md), surf
 - System tray menu: Open · Pause Capture · Clear History · Start with Windows · Quit.
 - pnpm + Cargo workspaces with shared [`core/`](./core) and [`win/`](./win) bundle shell.
 
+[0.4.2]: https://github.com/pepperonas/clipsnap/releases/tag/v0.4.2
 [0.4.1]: https://github.com/pepperonas/clipsnap/releases/tag/v0.4.1
 [0.4.0]: https://github.com/pepperonas/clipsnap/releases/tag/v0.4.0
 [0.3.1]: https://github.com/pepperonas/clipsnap/releases/tag/v0.3.1

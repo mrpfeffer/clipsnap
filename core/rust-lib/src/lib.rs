@@ -52,6 +52,7 @@ pub fn run(context: tauri::Context<Wry>) {
 
             let watcher_state = WatcherState::new();
             let paused = watcher_state.paused.clone();
+            let self_written = watcher_state.self_written.clone();
 
             let ui_state = UiState::default();
             let suppress_hide = ui_state.suppress_hide.clone();
@@ -88,7 +89,7 @@ pub fn run(context: tauri::Context<Wry>) {
                 }
             }
 
-            clipboard_watcher::spawn(app.handle().clone(), db_handle, paused);
+            clipboard_watcher::spawn(app.handle().clone(), db_handle, paused, self_written);
 
             build_tray(&app.handle())?;
 

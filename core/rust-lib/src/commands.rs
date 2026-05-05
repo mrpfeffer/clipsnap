@@ -61,6 +61,7 @@ const KEY_PLAIN_TEXT_ONLY: &str = "paste.plain_text_only";
 pub fn paste_entry(
     app: AppHandle,
     db: State<'_, DbHandle>,
+    watcher: State<'_, WatcherState>,
     id: i64,
 ) -> Result<(), String> {
     let entry = db::get(&db, id)
@@ -76,11 +77,12 @@ pub fn paste_entry(
             crate::models::ContentType::Html | crate::models::ContentType::Rtf
         )
     {
-        // Use the plain-text preview captured at clipboard-watch time.
-        // For Text entries content_text == content_data, so this branch
-        // intentionally does not fire for them.
+        // Mark + write the plain-text downgrade so the watcher skips
+        // capturing this back as a duplicate Text clip.
+        watcher.mark_self_write(crate::models::ContentType::Text, &entry.content_text);
         paste::paste_text(&entry.content_text).map_err(map_err)?;
     } else {
+        watcher.mark_self_write(entry.content_type, &entry.content_data);
         paste::paste_entry(&entry).map_err(map_err)?;
     }
     db::touch(&db, id).map_err(map_err)?;
@@ -115,6 +117,7 @@ pub fn set_paste_plain_text_only(
 pub fn paste_entry_formatted(
     app: AppHandle,
     db: State<'_, DbHandle>,
+    watcher: State<'_, WatcherState>,
     id: i64,
 ) -> Result<(), String> {
     let entry = db::get(&db, id)
@@ -122,6 +125,7 @@ pub fn paste_entry_formatted(
         .ok_or_else(|| "entry not found".to_string())?;
 
     hotkey::hide_popup(&app);
+    watcher.mark_self_write(entry.content_type, &entry.content_data);
     paste::paste_entry(&entry).map_err(map_err)?;
     db::touch(&db, id).map_err(map_err)?;
     Ok(())
@@ -156,11 +160,18 @@ pub fn hide_popup(app: AppHandle) -> Result<(), String> {
 
 /// Hide the popup, write `text` to the clipboard, and synthesize the paste
 /// shortcut. Used by the inline calculator (and any other "compute and
-/// paste" flow). The freshly-written clipboard entry will be picked up by
-/// the watcher and recorded in history naturally.
+/// paste" flow). The freshly-written clipboard entry would normally be
+/// picked up by the watcher and recorded in history; we mark the write
+/// so the watcher skips that one event — calc/color results aren't worth
+/// adding to history (they're cheap to recompute).
 #[tauri::command]
-pub fn paste_text(app: AppHandle, text: String) -> Result<(), String> {
+pub fn paste_text(
+    app: AppHandle,
+    watcher: State<'_, WatcherState>,
+    text: String,
+) -> Result<(), String> {
     hotkey::hide_popup(&app);
+    watcher.mark_self_write(crate::models::ContentType::Text, &text);
     paste::paste_text(&text).map_err(map_err)
 }
 
@@ -218,6 +229,7 @@ pub fn delete_snippet(db: State<'_, DbHandle>, id: i64) -> Result<(), String> {
 pub fn paste_snippet(
     app: AppHandle,
     db: State<'_, DbHandle>,
+    watcher: State<'_, WatcherState>,
     id: i64,
 ) -> Result<(), String> {
     let snippet = snippets::list_all(&db)
@@ -227,6 +239,7 @@ pub fn paste_snippet(
         .ok_or_else(|| "snippet not found".to_string())?;
 
     hotkey::hide_popup(&app);
+    watcher.mark_self_write(crate::models::ContentType::Text, &snippet.body);
     paste::paste_text(&snippet.body).map_err(map_err)?;
     Ok(())
 }
@@ -319,6 +332,7 @@ pub fn clear_notes(db: State<'_, DbHandle>) -> Result<(), String> {
 pub fn paste_note(
     app: AppHandle,
     db: State<'_, DbHandle>,
+    watcher: State<'_, WatcherState>,
     id: i64,
 ) -> Result<(), String> {
     let note = notes::get(&db, id)
@@ -334,8 +348,10 @@ pub fn paste_note(
             crate::models::ContentType::Html | crate::models::ContentType::Rtf
         )
     {
+        watcher.mark_self_write(crate::models::ContentType::Text, &note.content_text);
         paste::paste_text(&note.content_text).map_err(map_err)
     } else {
+        watcher.mark_self_write(note.content_type, &note.content_data);
         paste::paste_payload(note.content_type, &note.content_data, &note.content_text)
             .map_err(map_err)
     }
@@ -349,6 +365,7 @@ pub fn paste_note(
 pub fn paste_note_formatted(
     app: AppHandle,
     db: State<'_, DbHandle>,
+    watcher: State<'_, WatcherState>,
     id: i64,
 ) -> Result<(), String> {
     let note = notes::get(&db, id)
@@ -356,6 +373,7 @@ pub fn paste_note_formatted(
         .ok_or_else(|| "note not found".to_string())?;
 
     hotkey::hide_popup(&app);
+    watcher.mark_self_write(note.content_type, &note.content_data);
     paste::paste_payload(note.content_type, &note.content_data, &note.content_text)
         .map_err(map_err)
 }

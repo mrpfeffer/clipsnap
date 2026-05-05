@@ -6,23 +6,40 @@ use clipboard_rs::{
     Clipboard, ClipboardContext, ClipboardHandler, ClipboardWatcher, ClipboardWatcherContext,
     ContentFormat,
 };
+use parking_lot::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
 use tauri::{AppHandle, Emitter};
 
-use crate::db::{upsert_clip, DbHandle};
+use crate::db::{hash_payload, upsert_clip, DbHandle};
 use crate::models::{ContentType, NewClip, MAX_IMAGE_BYTES};
 
 pub struct WatcherState {
     pub paused: Arc<AtomicBool>,
+    /// SHA-256 hash of a clipboard payload **we** wrote to the OS just
+    /// now (typically a paste action). The watcher consumes-and-skips one
+    /// matching event so plain-text-paste of an HTML clip doesn't create
+    /// a duplicate "Text" history entry. Behaves like a one-shot fuse:
+    /// each `mark_self_write()` arms it; the next watcher event matching
+    /// the hash clears it.
+    pub self_written: Arc<Mutex<Option<String>>>,
 }
 
 impl WatcherState {
     pub fn new() -> Self {
         Self {
             paused: Arc::new(AtomicBool::new(false)),
+            self_written: Arc::new(Mutex::new(None)),
         }
+    }
+
+    /// Arm the self-write fuse with the hash of the payload we're about
+    /// to put on the clipboard. The next clipboard-watcher event that
+    /// hashes to the same value will be skipped + the fuse cleared.
+    pub fn mark_self_write(&self, content_type: ContentType, content_data: &str) {
+        let hash = hash_payload(content_type, content_data);
+        *self.self_written.lock() = Some(hash);
     }
 }
 
@@ -31,6 +48,7 @@ struct Handler {
     db: DbHandle,
     app: AppHandle,
     paused: Arc<AtomicBool>,
+    self_written: Arc<Mutex<Option<String>>>,
 }
 
 impl ClipboardHandler for Handler {
@@ -137,13 +155,28 @@ impl Handler {
     }
 
     fn store(&self, clip: NewClip) -> Result<()> {
+        // If this event matches a payload *we* just wrote (paste action),
+        // consume the fuse and skip — no duplicate history entry.
+        let payload_hash = hash_payload(clip.content_type, &clip.content_data);
+        {
+            let mut self_written = self.self_written.lock();
+            if self_written.as_deref() == Some(payload_hash.as_str()) {
+                *self_written = None;
+                return Ok(());
+            }
+        }
         let _id = upsert_clip(&self.db, &clip)?;
         let _ = self.app.emit("clipboard-changed", ());
         Ok(())
     }
 }
 
-pub fn spawn(app: AppHandle, db: DbHandle, paused: Arc<AtomicBool>) {
+pub fn spawn(
+    app: AppHandle,
+    db: DbHandle,
+    paused: Arc<AtomicBool>,
+    self_written: Arc<Mutex<Option<String>>>,
+) {
     thread::Builder::new()
         .name("clipboard-watcher".into())
         .spawn(move || {
@@ -166,6 +199,7 @@ pub fn spawn(app: AppHandle, db: DbHandle, paused: Arc<AtomicBool>) {
                 db,
                 app,
                 paused,
+                self_written,
             });
             watcher.start_watch();
         })

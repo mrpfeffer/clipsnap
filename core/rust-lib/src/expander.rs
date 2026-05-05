@@ -216,8 +216,18 @@ pub struct DiagnoseResult {
 ///    clipboard is saved and restored around the operation.
 pub fn diagnose_at_cursor(db: &DbHandle) -> Result<DiagnoseResult> {
     // 1) AX/UIA first — clean read, no side effects.
+    // BUT: on macOS, calling AX functions on an *untrusted* process
+    // triggers the system "would like to control" prompt as a side
+    // effect — even when we just want to silently fall back to the
+    // clipboard path. So short-circuit when we know the process isn't
+    // trusted yet.
     let access = default_field_access();
-    let (captured, path) = match access.read_word_before_cursor() {
+    let access_ok = accessibility_granted();
+    let (captured, path) = match if access_ok {
+        access.read_word_before_cursor()
+    } else {
+        Ok(None)
+    } {
         Ok(Some(word)) => (word, native_path()),
         Ok(None) | Err(_) => {
             // 2) Fall back to the clipboard roundtrip.
@@ -269,38 +279,44 @@ pub fn diagnose_at_cursor(db: &DbHandle) -> Result<DiagnoseResult> {
 /// expose accessibility info.
 pub fn expand_at_cursor(db: &DbHandle) -> Result<()> {
     // ── Path 1: native accessibility (AX / UIA) ────────────────────────────
+    // Skip AX entirely when the process isn't trusted — calling AX from
+    // an untrusted process fires the macOS permission prompt as a side
+    // effect, which is exactly the noise we want to avoid for users in
+    // the post-rebuild stale-cdhash state. Fall straight through to the
+    // clipboard path; the SettingsPanel banner / Force re-grant button
+    // is the right place to surface the underlying permission issue.
     let access = default_field_access();
-    if let Ok(Some(word)) = access.read_word_before_cursor() {
-        if let Some(snippet) = snippets::find_by_exact_abbreviation(db, &word)? {
-            // Try the in-place replace via the same accessibility layer.
-            // Returns false when the focused element exposes a value/range
-            // for *reading* but not for setting — which is rare on macOS
-            // (most AX-aware fields support both) but normal on Windows
-            // (UiaFieldAccess deliberately uses Backspace+type for the
-            // write half because UIA's Replace is patchily implemented).
-            match access.try_replace_word_before_cursor(&snippet.body) {
-                Ok(true) => return Ok(()),
-                Ok(false) => {
-                    tracing::debug!(
-                        "AX/UIA replace not supported for this element; \
-                         falling back to clipboard paste"
-                    );
-                    // Fall through to the keystroke path below, but reuse
-                    // the abbreviation we already captured (so we don't
-                    // do select-prev-word again — the cursor is in the
-                    // same place).
-                    return expand_via_clipboard(db, Some(&word), Some(&snippet.body));
-                }
-                Err(e) => {
-                    tracing::warn!("AX/UIA replace errored: {e:#}; falling back");
-                    return expand_via_clipboard(db, Some(&word), Some(&snippet.body));
+    if accessibility_granted() {
+        if let Ok(Some(word)) = access.read_word_before_cursor() {
+            if let Some(snippet) = snippets::find_by_exact_abbreviation(db, &word)? {
+                // Try the in-place replace via the same accessibility
+                // layer. Returns false when the focused element exposes
+                // a value/range for *reading* but not for setting —
+                // which is rare on macOS (most AX-aware fields support
+                // both) but normal on Windows (UiaFieldAccess
+                // deliberately uses Backspace+type for the write half
+                // because UIA's Replace is patchily implemented).
+                match access.try_replace_word_before_cursor(&snippet.body) {
+                    Ok(true) => return Ok(()),
+                    Ok(false) => {
+                        tracing::debug!(
+                            "AX/UIA replace not supported for this element; \
+                             falling back to clipboard paste"
+                        );
+                        // Reuse the abbreviation we already captured.
+                        return expand_via_clipboard(db, Some(&word), Some(&snippet.body));
+                    }
+                    Err(e) => {
+                        tracing::warn!("AX/UIA replace errored: {e:#}; falling back");
+                        return expand_via_clipboard(db, Some(&word), Some(&snippet.body));
+                    }
                 }
             }
+            // No snippet matched. We still want the user to *see* the
+            // failure — leaving the field untouched is the right move;
+            // no fallback needed for the no-match case.
+            return Ok(());
         }
-        // No snippet matched. We still want the user to *see* the failure
-        // — leaving the field untouched is the right move; no fallback
-        // needed for the no-match case.
-        return Ok(());
     }
 
     // ── Path 2: clipboard roundtrip (legacy) ───────────────────────────────
